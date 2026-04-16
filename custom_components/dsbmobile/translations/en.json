@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DSBmobile Login",
+        "description": "Enter your DSBmobile credentials.",
+        "data": {
+          "username": "User ID",
+          "password": "Password",
+          "class_name": "Class (e.g. 7b, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials",
+      "unknown": "Unknown error"
+    },
+    "abort": {
+      "already_configured": "This account is already configured."
+    }
+  }
+}
