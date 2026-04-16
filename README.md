@@ -186,10 +186,110 @@ Die Integration nutzt die DSBmobile **Mobile API** (die einfachste und stabilste
 
 ### Architektur
 
-- `DSBMobileAPI` (in `dsb_api.py`): Async API-Client mit `aiohttp`, übernimmt Auth, Datenabruf und HTML-Parsing
-- `DSBDataUpdateCoordinator` (in `sensor.py`): Standard HA `DataUpdateCoordinator` für regelmäßige Updates
-- `DSBVertretungsplanSensor`: `CoordinatorEntity` Sensor, der die Daten als State + Attribute bereitstellt
-- `DSBMobileConfigFlow` (in `config_flow.py`): UI-basierte Konfiguration mit Login-Validierung
+```mermaid
+graph TB
+    subgraph Home Assistant
+        CF[Config Flow<br><i>config_flow.py</i>]
+        CO[DataUpdateCoordinator<br><i>sensor.py</i>]
+        SE[Vertretungsplan Sensor<br><i>sensor.py</i>]
+        AU[Automationen<br><i>automations.yaml</i>]
+    end
+
+    subgraph DSBmobile Integration
+        API[DSBMobileAPI<br><i>dsb_api.py</i>]
+        PA[HTML Parser<br><i>BeautifulSoup</i>]
+    end
+
+    subgraph DSBmobile Server
+        AUTH[Auth Endpoint<br><i>mobileapi.dsbcontrol.de/authid</i>]
+        TT[Timetables Endpoint<br><i>mobileapi.dsbcontrol.de/dsbtimetables</i>]
+        HTML[Vertretungsplan HTML<br><i>light.dsbcontrol.de</i>]
+    end
+
+    CF -->|Zugangsdaten validieren| API
+    CO -->|alle 30 Min| API
+    API -->|1. Login| AUTH
+    AUTH -->|Token UUID| API
+    API -->|2. Pläne abrufen| TT
+    TT -->|JSON mit URLs| API
+    API -->|3. HTML laden| HTML
+    HTML -->|Untis HTML| PA
+    PA -->|Einträge gefiltert nach Klasse| CO
+    CO -->|Update| SE
+    SE -->|State + Attribute| AU
+```
+
+### Datenfluss
+
+```mermaid
+sequenceDiagram
+    participant HA as Home Assistant
+    participant CO as Coordinator
+    participant API as DSBMobileAPI
+    participant DSB as DSBmobile Server
+    participant HTML as Plan HTML Server
+
+    HA->>CO: Update (alle 30 Min)
+    CO->>API: get_substitutions("7b")
+    API->>DSB: GET /authid?user=...&password=...
+    DSB-->>API: "a1b2c3d4-..."  (Token)
+    API->>DSB: GET /dsbtimetables?authid=TOKEN
+    DSB-->>API: JSON [{Title, Childs: [{Detail: URL}]}]
+    loop Für jeden Plan
+        API->>HTML: GET Vertretungen.htm
+        HTML-->>API: HTML (Untis Tabelle)
+        API->>API: Parse & Filter nach "7b"
+    end
+    API-->>CO: List[SubstitutionEntry]
+    CO-->>HA: Sensor Update (count + entries)
+```
+
+### Komponentenübersicht
+
+```mermaid
+classDiagram
+    class DSBMobileAPI {
+        -username: str
+        -password: str
+        -session: aiohttp.ClientSession
+        -token: str
+        +authenticate() bool
+        +get_plans() list~dict~
+        +get_substitutions(class_filter) list~SubstitutionEntry~
+        -_parse_plan_html(html, filter) list~SubstitutionEntry~
+    }
+
+    class SubstitutionEntry {
+        +day: str
+        +class_name: str
+        +lesson: str
+        +subject: str
+        +substitute: str
+        +room: str
+        +info: str
+        +raw_text: str
+    }
+
+    class DSBDataUpdateCoordinator {
+        +api: DSBMobileAPI
+        +class_filter: str
+        +_async_update_data() list~SubstitutionEntry~
+    }
+
+    class DSBVertretungsplanSensor {
+        +native_value: int
+        +extra_state_attributes: dict
+    }
+
+    class DSBMobileConfigFlow {
+        +async_step_user(user_input) ConfigFlowResult
+    }
+
+    DSBMobileAPI --> SubstitutionEntry : erzeugt
+    DSBDataUpdateCoordinator --> DSBMobileAPI : nutzt
+    DSBVertretungsplanSensor --> DSBDataUpdateCoordinator : liest von
+    DSBMobileConfigFlow --> DSBMobileAPI : validiert mit
+```
 
 ---
 
