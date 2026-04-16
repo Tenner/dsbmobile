@@ -6,6 +6,10 @@
 #   2. Dashboard öffnen → Drei Punkte → Raw-Konfigurationseditor
 #   3. Diesen YAML-Inhalt einfügen
 #   4. Entity-IDs anpassen (sensor.vertretungsplan_08b → deine Klasse)
+#
+# Voraussetzung:
+#   - DSBmobile Integration v2.2+ installiert
+#   - Optional: mushroom-cards + card-mod (HACS) für Styling
 ###############################################################################
 
 title: Vertretungsplan
@@ -15,7 +19,7 @@ views:
     path: vertretungsplan
     cards:
 
-      # ── Header: Klasse + Anzahl + Letzte Aktualisierung ──────────────
+      # ── Header ───────────────────────────────────────────────────────
       - type: custom:mushroom-template-card
         primary: |
           Vertretungsplan {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }}
@@ -28,11 +32,7 @@ views:
           {% endif %}
         icon: mdi:school
         icon_color: >
-          {% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}
-            red
-          {% else %}
-            green
-          {% endif %}
+          {% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}red{% else %}green{% endif %}
         card_mod:
           style: |
             ha-card {
@@ -47,7 +47,7 @@ views:
               --card-primary-font-weight: 700;
             }
 
-      # ── Vertretungstabelle (nur wenn Einträge vorhanden) ─────────────
+      # ── Vertretungstabelle nach Tag gruppiert ────────────────────────
       - type: conditional
         conditions:
           - condition: numeric_state
@@ -59,72 +59,30 @@ views:
             {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
             {% set days = entries | map(attribute='day') | unique | list %}
             {% for day in days %}
+            ### 📅 {{ day }}
 
-            ## {{ day if day else 'Unbekannt' }}
-
-            | Std | Fach | Vertreter | Raum | Info |
-            |:---:|:----:|:---------:|:----:|:-----|
-            {% for e in entries if e.day == day %}
-            | {{ e.lesson }} | {{ e.subject }} | {{ e.substitute }} | {{ e.room }} | {{ e.info }} |
+            | Art | Std | Fach | Raum | Info |
+            |:----|:---:|:----:|:----:|:-----|
+            {% for e in entries if e.day == day -%}
+            | {{ e.art }} | {{ e.lesson }} | {{ e.subject }} | {{ e.room }} | {{ e.text }} |
+            {% endfor %}
             {% endfor %}
 
-            {% endfor %}
-          card_mod:
-            style: |
-              ha-card {
-                background: linear-gradient(135deg, rgba(239,83,80,0.08) 0%, rgba(239,83,80,0.02) 100%);
-                border: 1px solid rgba(239,83,80,0.2);
-                border-radius: 16px;
-              }
-              ha-markdown {
-                padding: 0 16px !important;
-              }
-              table {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 14px;
-              }
-              th {
-                background: rgba(255,255,255,0.05);
-                padding: 8px 6px;
-                text-align: center;
-                font-weight: 600;
-              }
-              td {
-                padding: 6px;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-              }
-              h2 {
-                color: #ef5350;
-                font-size: 16px;
-                margin: 16px 0 8px 0;
-                padding-bottom: 4px;
-                border-bottom: 1px solid rgba(239,83,80,0.3);
-              }
-
-      # ── Alles normal (nur wenn keine Einträge) ──────────────────────
+      # ── Alles normal ─────────────────────────────────────────────────
       - type: conditional
         conditions:
           - condition: numeric_state
             entity: sensor.vertretungsplan_08b
             below: 1
         card:
-          type: markdown
-          title: "✅ Alles normal"
-          content: >
-            Keine Vertretungen für Klasse
-            **{{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }}**.
+          type: custom:mushroom-template-card
+          primary: Keine Vertretungen
+          secondary: >
+            Klasse {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }} — alles nach Plan
+          icon: mdi:check-circle
+          icon_color: green
 
-            Nächste Aktualisierung in ~30 Minuten.
-          card_mod:
-            style: |
-              ha-card {
-                background: linear-gradient(135deg, rgba(102,187,106,0.08) 0%, rgba(102,187,106,0.02) 100%);
-                border: 1px solid rgba(102,187,106,0.2);
-                border-radius: 16px;
-              }
-
-      # ── Verlauf ─────────────────────────────────────────────────────
+      # ── Verlauf ──────────────────────────────────────────────────────
       - type: history-graph
         title: "📊 Verlauf (7 Tage)"
         hours_to_show: 168

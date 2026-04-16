@@ -124,12 +124,14 @@ class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], Sens
         entries = [
             {
                 "day": e.day,
+                "art": e.art,
                 "class": e.class_name,
                 "lesson": e.lesson,
                 "subject": e.subject,
-                "substitute": e.substitute,
                 "room": e.room,
-                "info": e.info,
+                "vertr_von": e.vertr_von,
+                "nach": e.nach,
+                "text": e.text,
             }
             for e in filtered
         ]

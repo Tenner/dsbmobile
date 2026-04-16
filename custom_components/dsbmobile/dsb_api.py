@@ -25,12 +25,14 @@ class SubstitutionEntry:
     """A single substitution plan entry."""
 
     day: str
+    art: str
     class_name: str
     lesson: str
     subject: str
-    substitute: str
     room: str
-    info: str
+    vertr_von: str
+    nach: str
+    text: str
     raw_text: str
 
 
@@ -248,17 +250,34 @@ class DSBMobileAPI:
 
     @staticmethod
     def _parse_plan_html(html: str, class_filter: str) -> list[SubstitutionEntry]:
-        """Parse Untis substitution plan HTML."""
+        """Parse Untis substitution plan HTML.
+
+        Untis format:
+        - Day header: div.mon_title (e.g. "16.4.2026 Donnerstag")
+        - Table: table.mon_list
+        - Columns: Art | Klasse(n) | Stunde | (Fach) | Raum | Vertr. von | (Le.) nach | Text
+        - Header row uses <th>, data rows use <td>
+        """
         soup = BeautifulSoup(html, "html.parser")
         results: list[SubstitutionEntry] = []
         current_day = ""
 
+        # Find day headers: div.mon_title
+        day_divs = {id(div): div.get_text(" ", strip=True)
+                    for div in soup.find_all("div", class_="mon_title")}
+
+        # Walk through all elements in order
         for el in soup.find_all(["div", "tr"]):
-            if el.name == "div" and "dayHeader" in (el.get("class") or []):
-                current_day = el.get_text(" ", strip=True)
+            # Day header
+            if el.name == "div" and id(el) in day_divs:
+                current_day = day_divs[id(el)]
                 continue
 
             if el.name != "tr":
+                continue
+
+            # Skip header rows (th cells)
+            if el.find("th"):
                 continue
 
             cells = el.find_all("td")
@@ -272,17 +291,21 @@ class DSBMobileAPI:
             if class_filter and class_filter.lower() not in raw.lower():
                 continue
 
-            cell_texts = [c.get_text(strip=True) for c in cells]
+            # Untis columns: Art | Klasse(n) | Stunde | (Fach) | Raum | Vertr. von | (Le.) nach | Text
+            c = [cell.get_text(strip=True) for cell in cells]
             entry = SubstitutionEntry(
                 day=current_day,
-                class_name=cell_texts[0] if len(cell_texts) > 0 else "",
-                lesson=cell_texts[1] if len(cell_texts) > 1 else "",
-                subject=cell_texts[2] if len(cell_texts) > 2 else "",
-                substitute=cell_texts[3] if len(cell_texts) > 3 else "",
-                room=cell_texts[4] if len(cell_texts) > 4 else "",
-                info=cell_texts[5] if len(cell_texts) > 5 else "",
+                art=c[0] if len(c) > 0 else "",
+                class_name=c[1] if len(c) > 1 else "",
+                lesson=c[2] if len(c) > 2 else "",
+                subject=c[3] if len(c) > 3 else "",
+                room=c[4] if len(c) > 4 else "",
+                vertr_von=c[5] if len(c) > 5 else "",
+                nach=c[6] if len(c) > 6 else "",
+                text=c[7] if len(c) > 7 else "",
                 raw_text=raw,
             )
             results.append(entry)
 
         return results
+
