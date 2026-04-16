@@ -7,7 +7,7 @@
         "data": {
           "username": "Benutzer-ID",
           "password": "Passwort",
-          "class_name": "Klasse (z.B. 7b, optional)"
+          "class_name": "Klasse(n) (z.B. 08b oder 08b, 05a — kommagetrennt, optional)"
         }
       }
     },
@@ -24,7 +24,7 @@
       "init": {
         "title": "DSBmobile Einstellungen",
         "data": {
-          "class_name": "Klasse (z.B. 7b, leer = alle)"
+          "class_name": "Klasse(n) (z.B. 08b oder 08b, 05a — kommagetrennt, leer = alle)"
         }
       }
     }

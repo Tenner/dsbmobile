@@ -14,7 +14,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
-    UpdateFailed,
 )
 
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_CLASS, DEFAULT_SCAN_INTERVAL
@@ -28,36 +27,42 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up DSBmobile sensor from a config entry."""
+    """Set up DSBmobile sensors from a config entry."""
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
-    class_filter = entry.data.get(CONF_CLASS, "")
+    class_input = entry.data.get(CONF_CLASS, "")
 
-    session = async_get_clientsession(hass)
-    # Web API needs cookie jar for session management
     jar = aiohttp.CookieJar()
     web_session = aiohttp.ClientSession(cookie_jar=jar)
     api = DSBMobileAPI(username, password, web_session)
 
-    coordinator = DSBDataUpdateCoordinator(hass, api, class_filter)
+    # Fetch ALL entries (no filter) — each sensor filters locally
+    coordinator = DSBDataUpdateCoordinator(hass, api)
 
-    # Don't fail setup if first fetch fails — sensor will show "unavailable"
-    # and retry on next update cycle
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:
-        _LOGGER.warning("First data fetch failed, sensor will retry in %s seconds", DEFAULT_SCAN_INTERVAL)
+        _LOGGER.warning("First data fetch failed, will retry in %s seconds", DEFAULT_SCAN_INTERVAL)
         coordinator.data = []
 
-    async_add_entities([DSBVertretungsplanSensor(coordinator, entry, class_filter)])
+    # Parse comma-separated classes, create one sensor per class
+    classes = [c.strip() for c in class_input.split(",") if c.strip()]
+
+    sensors: list[DSBVertretungsplanSensor] = []
+    if classes:
+        for cls in classes:
+            sensors.append(DSBVertretungsplanSensor(coordinator, entry, cls))
+    else:
+        # No filter — one sensor for all entries
+        sensors.append(DSBVertretungsplanSensor(coordinator, entry, ""))
+
+    async_add_entities(sensors)
 
 
 class DSBDataUpdateCoordinator(DataUpdateCoordinator[list[SubstitutionEntry]]):
-    """Coordinator to fetch DSBmobile data."""
+    """Coordinator to fetch ALL DSBmobile entries (unfiltered)."""
 
-    def __init__(
-        self, hass: HomeAssistant, api: DSBMobileAPI, class_filter: str
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, api: DSBMobileAPI) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -65,24 +70,22 @@ class DSBDataUpdateCoordinator(DataUpdateCoordinator[list[SubstitutionEntry]]):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self.api = api
-        self.class_filter = class_filter
 
     async def _async_update_data(self) -> list[SubstitutionEntry]:
-        """Fetch data from DSBmobile."""
+        """Fetch all substitution data without class filter."""
         try:
-            entries = await self.api.get_substitutions(self.class_filter)
-            _LOGGER.debug("Fetched %d substitution entries", len(entries))
+            entries = await self.api.get_substitutions("")
+            _LOGGER.debug("Fetched %d total substitution entries", len(entries))
             return entries
         except Exception as err:
             _LOGGER.error("Error fetching DSBmobile data: %s", err)
-            # Return previous data if available, otherwise empty list
             if self.data is not None:
                 return self.data
             return []
 
 
 class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], SensorEntity):
-    """Sensor showing the number of substitution entries."""
+    """Sensor showing substitution entries, optionally filtered by class."""
 
     _attr_icon = "mdi:school"
 
@@ -96,40 +99,46 @@ class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], Sens
         self._class_filter = class_filter
         suffix = f" {class_filter}" if class_filter else ""
         self._attr_name = f"Vertretungsplan{suffix}"
-        self._attr_unique_id = f"{entry.entry_id}_vertretungsplan"
+        self._attr_unique_id = f"{entry.entry_id}_vertretungsplan_{class_filter or 'all'}"
+
+    def _filtered_entries(self) -> list[SubstitutionEntry]:
+        """Return entries filtered by this sensor's class."""
+        if not self.coordinator.data:
+            return []
+        if not self._class_filter:
+            return self.coordinator.data
+        return [
+            e for e in self.coordinator.data
+            if self._class_filter.lower() in e.raw_text.lower()
+        ]
 
     @property
     def native_value(self) -> int:
         """Return the number of substitution entries."""
-        if self.coordinator.data is None:
-            return 0
-        return len(self.coordinator.data)
+        return len(self._filtered_entries())
 
     @property
     def extra_state_attributes(self) -> dict:
         """Return detailed substitution entries as attributes."""
-        entries = []
-        if self.coordinator.data:
-            for e in self.coordinator.data:
-                entries.append({
-                    "day": e.day,
-                    "class": e.class_name,
-                    "lesson": e.lesson,
-                    "subject": e.subject,
-                    "substitute": e.substitute,
-                    "room": e.room,
-                    "info": e.info,
-                })
+        filtered = self._filtered_entries()
+        entries = [
+            {
+                "day": e.day,
+                "class": e.class_name,
+                "lesson": e.lesson,
+                "subject": e.subject,
+                "substitute": e.substitute,
+                "room": e.room,
+                "info": e.info,
+            }
+            for e in filtered
+        ]
 
-        # Collect non-HTML plan URLs (images, documents)
-        other_plans = []
-        for plan in self.coordinator.api.last_plans:
-            if not plan.is_html:
-                other_plans.append({
-                    "title": plan.title,
-                    "date": plan.date,
-                    "url": plan.url,
-                })
+        other_plans = [
+            {"title": p.title, "date": p.date, "url": p.url}
+            for p in self.coordinator.api.last_plans
+            if not p.is_html
+        ]
 
         return {
             "class_filter": self._class_filter,
