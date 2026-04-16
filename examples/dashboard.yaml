@@ -65,10 +65,8 @@ views:
           {% if days | length > 0 %}
           ## 📅 {{ days[0] }}
           {% for e in entries if e.day == days[0] %}
-          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
-          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
+          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-          ---
           {% endfor %}
           {% else %}
           _Keine Daten_
@@ -88,10 +86,8 @@ views:
           {% if days | length > 1 %}
           ## 📅 {{ days[1] }}
           {% for e in entries if e.day == days[1] %}
-          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
-          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
+          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-          ---
           {% endfor %}
           {% else %}
           _Kein weiterer Tag_
@@ -111,10 +107,8 @@ views:
           {% if days | length > 2 %}
           ## 📅 {{ days[2] }}
           {% for e in entries if e.day == days[2] %}
-          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
-          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
+          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-          ---
           {% endfor %}
           {% else %}
           _Kein weiterer Tag_
