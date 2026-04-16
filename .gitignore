@@ -1,8 +1,31 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+build/
+*.egg
+
+# Test / Dev
+test_api.py
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Environment
 .env
+.venv/
+venv/
+
+# IDE
 .vscode/
 .idea/
-test_api.py
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Kiro
+.kiro/
