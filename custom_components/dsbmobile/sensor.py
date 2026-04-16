@@ -37,7 +37,14 @@ async def async_setup_entry(
     api = DSBMobileAPI(username, password, session)
 
     coordinator = DSBDataUpdateCoordinator(hass, api, class_filter)
-    await coordinator.async_config_entry_first_refresh()
+
+    # Don't fail setup if first fetch fails — sensor will show "unavailable"
+    # and retry on next update cycle
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        _LOGGER.warning("First data fetch failed, sensor will retry in %s seconds", DEFAULT_SCAN_INTERVAL)
+        coordinator.data = []
 
     async_add_entities([DSBVertretungsplanSensor(coordinator, entry, class_filter)])
 
@@ -60,9 +67,15 @@ class DSBDataUpdateCoordinator(DataUpdateCoordinator[list[SubstitutionEntry]]):
     async def _async_update_data(self) -> list[SubstitutionEntry]:
         """Fetch data from DSBmobile."""
         try:
-            return await self.api.get_substitutions(self.class_filter)
+            entries = await self.api.get_substitutions(self.class_filter)
+            _LOGGER.debug("Fetched %d substitution entries", len(entries))
+            return entries
         except Exception as err:
-            raise UpdateFailed(f"Error fetching DSBmobile data: {err}") from err
+            _LOGGER.error("Error fetching DSBmobile data: %s", err)
+            # Return previous data if available, otherwise empty list
+            if self.data is not None:
+                return self.data
+            return []
 
 
 class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], SensorEntity):

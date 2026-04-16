@@ -54,12 +54,16 @@ class DSBMobileAPI:
         try:
             async with self._session.get(DSB_AUTH_URL, params=params) as resp:
                 if resp.status != 200:
+                    _LOGGER.error("Auth returned status %s", resp.status)
                     return False
                 token = await resp.text()
+                _LOGGER.debug("Auth response: %s", token[:50] if token else "(empty)")
                 token = token.strip().strip('"')
                 if not token:
+                    _LOGGER.error("Auth returned empty token")
                     return False
                 self._token = token
+                _LOGGER.debug("Authenticated successfully, token: %s...", token[:8])
                 return True
         except aiohttp.ClientError as err:
             _LOGGER.error("Authentication failed: %s", err)
@@ -81,6 +85,7 @@ class DSBMobileAPI:
             _LOGGER.error("Failed to fetch plans: %s", err)
             return []
 
+        _LOGGER.debug("Timetables response: %d items", len(data) if data else 0)
         plans = []
         for item in data or []:
             for child in item.get("Childs", []):
@@ -91,6 +96,7 @@ class DSBMobileAPI:
                         "date": item.get("Date", ""),
                         "url": detail,
                     })
+        _LOGGER.debug("Found %d plan URLs", len(plans))
         return plans
 
     async def get_substitutions(self, class_filter: str = "") -> list[SubstitutionEntry]:
