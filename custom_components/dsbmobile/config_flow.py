@@ -7,8 +7,8 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_CLASS
 from .dsb_api import DSBMobileAPI
@@ -38,6 +38,12 @@ class DSBMobileConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow handler."""
+        return DSBMobileOptionsFlow(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -66,3 +72,33 @@ class DSBMobileConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class InvalidAuth(Exception):
     """Error to indicate invalid authentication."""
+
+
+class DSBMobileOptionsFlow(OptionsFlow):
+    """Handle options for DSBmobile."""
+
+    def __init__(self, config_entry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            # Update the config entry data with the new class
+            new_data = {**self._config_entry.data, CONF_CLASS: user_input[CONF_CLASS]}
+            self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
+            # Reload the integration so the sensor picks up the new class
+            await self.hass.config_entries.async_reload(self._config_entry.entry_id)
+            return self.async_create_entry(title="", data={})
+
+        current_class = self._config_entry.data.get(CONF_CLASS, "")
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_CLASS, default=current_class): str,
+                }
+            ),
+        )

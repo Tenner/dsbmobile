@@ -18,5 +18,15 @@
     "abort": {
       "already_configured": "This account is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DSBmobile Settings",
+        "data": {
+          "class_name": "Class (e.g. 7b, empty = all)"
+        }
+      }
+    }
   }
 }

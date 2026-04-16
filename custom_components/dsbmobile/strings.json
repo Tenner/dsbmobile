@@ -18,5 +18,15 @@
     "abort": {
       "already_configured": "Dieses Konto ist bereits konfiguriert."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "DSBmobile Einstellungen",
+        "data": {
+          "class_name": "Klasse (z.B. 7b, leer = alle)"
+        }
+      }
+    }
   }
 }
