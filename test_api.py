@@ -1,17 +1,16 @@
-"""Test the Web API endpoint found in configuration.js."""
+"""Test fetching the actual subst_*.htm files."""
 import asyncio
-import json
-import gzip
-import base64
-import uuid
-from datetime import datetime, timezone
-
 import aiohttp
 from bs4 import BeautifulSoup
 import getpass
 
 LOGIN_URL = "https://www.dsbmobile.de/Login.aspx"
-WEB_API_URL = "https://www.dsbmobile.de/jhw-1fd98248-440c-4283-bef6-dc82fe769b61.ashx/GetData"
+
+PLAN_URLS = [
+    "https://dsbmobile.de/data/d96553e1-c205-46d6-998e-cc9676bd6046/2b487ea6-ccbc-42ba-a9c8-1ede780c815d/subst_001.htm",
+    "https://dsbmobile.de/data/d96553e1-c205-46d6-998e-cc9676bd6046/2b487ea6-ccbc-42ba-a9c8-1ede780c815d/subst_002.htm",
+    "https://dsbmobile.de/data/d96553e1-c205-46d6-998e-cc9676bd6046/2b487ea6-ccbc-42ba-a9c8-1ede780c815d/subst_003.htm",
+]
 
 
 async def main():
@@ -20,7 +19,7 @@ async def main():
 
     jar = aiohttp.CookieJar()
     async with aiohttp.ClientSession(cookie_jar=jar) as session:
-        # 1. Login first to get session cookies
+        # Login first
         async with session.get(LOGIN_URL) as resp:
             html = await resp.text()
         soup = BeautifulSoup(html, "html.parser")
@@ -33,50 +32,28 @@ async def main():
             "ctl03": "Anmelden",
         }
         async with session.post(LOGIN_URL, data=form, allow_redirects=True) as resp:
-            if "Login" in (await resp.text())[:300]:
-                print("Login fehlgeschlagen")
-                return
-            print("Login OK")
+            print("Login OK\n")
 
-        # 2. Call the Web API (same format as Android API)
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        payload = {
-            "UserId": username,
-            "UserPw": password,
-            "AppVersion": "2.3",
-            "Language": "de",
-            "OsVersion": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "AppId": str(uuid.uuid4()),
-            "Device": "WebApp",
-            "BundleId": "de.heinekingmedia.inhouse.dsbmobile.web",
-            "Date": now,
-            "LastUpdate": now,
-            "PushId": "",
-        }
+        # Fetch each plan URL
+        for url in PLAN_URLS:
+            print(f"=== {url.split('/')[-1]} ===")
+            try:
+                async with session.get(url) as resp:
+                    print(f"Status: {resp.status}")
+                    print(f"Content-Type: {resp.headers.get('Content-Type', '?')}")
+                    if resp.status == 200:
+                        html = await resp.text()
+                        print(f"Length: {len(html)} chars")
+                        print(f"Preview: {html[:500]}")
 
-        compressed = gzip.compress(json.dumps(payload).encode("utf-8"))
-        encoded = base64.b64encode(compressed).decode("utf-8")
-        body = {"req": {"Data": encoded, "DataType": 1}}
-
-        async with session.post(
-            WEB_API_URL,
-            json=body,
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "Referer": "https://www.dsbmobile.de/default.aspx",
-            },
-        ) as resp:
-            print(f"\nAPI Status: {resp.status}")
-            result = await resp.json(content_type=None)
-
-            resp_data = result.get("d", "")
-            if resp_data:
-                decoded = gzip.decompress(base64.b64decode(resp_data))
-                data = json.loads(decoded)
-                print(json.dumps(data, indent=2, ensure_ascii=False))
-            else:
-                print("Response:")
-                print(json.dumps(result, indent=2, ensure_ascii=False))
+                        # Check for 08b
+                        if "08b" in html.lower():
+                            print(">>> CONTAINS 08b <<<")
+                        else:
+                            print("(does not contain 08b)")
+                    print()
+            except Exception as e:
+                print(f"Error: {e}\n")
 
 
 asyncio.run(main())

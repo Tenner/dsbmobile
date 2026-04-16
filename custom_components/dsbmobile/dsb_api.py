@@ -220,13 +220,23 @@ class DSBMobileAPI:
                         plan.is_html = False
                         continue
 
-                    html = await resp.text()
+                    # Read raw bytes and detect encoding
+                    raw = await resp.read()
+                    # Try iso-8859-1 first (common for Untis), then utf-8
+                    html = None
+                    for encoding in ("iso-8859-1", "utf-8", "latin-1", "cp1252"):
+                        try:
+                            html = raw.decode(encoding)
+                            break
+                        except (UnicodeDecodeError, LookupError):
+                            continue
+
+                    if html is None:
+                        _LOGGER.warning("Could not decode plan %s with any encoding", plan.title)
+                        continue
+
                     _LOGGER.debug("Fetched HTML plan: %s (%d chars)", plan.title, len(html))
 
-            except UnicodeDecodeError:
-                _LOGGER.warning("Plan %s is binary, skipping", plan.title)
-                plan.is_html = False
-                continue
             except aiohttp.ClientError as err:
                 _LOGGER.warning("Failed to fetch %s: %s", plan.url, err)
                 continue
