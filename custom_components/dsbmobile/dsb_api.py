@@ -12,8 +12,6 @@ from datetime import datetime, timezone
 import aiohttp
 from bs4 import BeautifulSoup
 
-from .const import CONF_USERNAME, CONF_PASSWORD
-
 _LOGGER = logging.getLogger(__name__)
 
 LOGIN_URL = "https://www.dsbmobile.de/Login.aspx"

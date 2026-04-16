@@ -9,7 +9,6 @@ import aiohttp
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -35,6 +34,10 @@ async def async_setup_entry(
     jar = aiohttp.CookieJar()
     web_session = aiohttp.ClientSession(cookie_jar=jar)
     api = DSBMobileAPI(username, password, web_session)
+
+    # Store session for cleanup on unload
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {"session": web_session}
 
     # Fetch ALL entries (no filter) — each sensor filters locally
     coordinator = DSBDataUpdateCoordinator(hass, api)
