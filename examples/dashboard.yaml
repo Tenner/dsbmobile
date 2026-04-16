@@ -1,0 +1,104 @@
+###############################################################################
+# DSBmobile Vertretungsplan – Beispiel Dashboard
+#
+# Einrichtung:
+#   1. In Home Assistant: Einstellungen → Dashboards → Dashboard hinzufügen
+#   2. Dashboard öffnen → Drei Punkte → Raw-Konfigurationseditor
+#   3. Diesen YAML-Inhalt einfügen
+#   4. Entity-IDs anpassen (sensor.vertretungsplan_7b → deine Klasse)
+#
+# Voraussetzung:
+#   - DSBmobile Integration installiert und eingerichtet
+#   - Optional: card-mod (HACS) für erweiterte Styles
+###############################################################################
+
+title: Vertretungsplan
+views:
+  - title: Vertretungsplan
+    icon: mdi:school
+    path: vertretungsplan
+    cards:
+
+      # ── Übersichtskarte ──────────────────────────────────────────────
+      - type: entities
+        title: "📋 Vertretungsplan Übersicht"
+        show_header_toggle: false
+        entities:
+          - entity: sensor.vertretungsplan_7b
+            name: Anzahl Vertretungen
+            icon: mdi:counter
+          - type: attribute
+            entity: sensor.vertretungsplan_7b
+            attribute: class_filter
+            name: Klasse
+            icon: mdi:account-group
+
+      # ── Statusanzeige (groß) ─────────────────────────────────────────
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.vertretungsplan_7b
+            above: 0
+        card:
+          type: markdown
+          title: "🔔 Aktuelle Vertretungen"
+          content: >
+            {% set entries = state_attr('sensor.vertretungsplan_7b', 'entries') %}
+            {% if entries and entries | length > 0 %}
+
+            | Tag | Std | Fach | Vertreter | Raum | Info |
+            |-----|-----|------|-----------|------|------|
+            {% for e in entries %}
+            | {{ e.day }} | {{ e.lesson }} | {{ e.subject }} | {{ e.substitute }} | {{ e.room }} | {{ e.info }} |
+            {% endfor %}
+
+            {% else %}
+            Keine Vertretungen vorhanden.
+            {% endif %}
+
+      # ── Keine Vertretungen ───────────────────────────────────────────
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.vertretungsplan_7b
+            below: 1
+        card:
+          type: markdown
+          title: "✅ Alles normal"
+          content: >
+            Keine Vertretungen für Klasse
+            **{{ state_attr('sensor.vertretungsplan_7b', 'class_filter') }}**.
+
+
+            Nächste Aktualisierung in ~30 Minuten.
+
+      # ── Verlauf der letzten 7 Tage ──────────────────────────────────
+      - type: history-graph
+        title: "📊 Vertretungen letzte 7 Tage"
+        hours_to_show: 168
+        entities:
+          - entity: sensor.vertretungsplan_7b
+            name: Anzahl Vertretungen
+
+      # ── Detailkarten pro Tag (automatisch) ───────────────────────────
+      - type: markdown
+        title: "📅 Details nach Tag"
+        content: >
+          {% set entries = state_attr('sensor.vertretungsplan_7b', 'entries') %}
+          {% if entries and entries | length > 0 %}
+            {% set days = entries | map(attribute='day') | unique | list %}
+            {% for day in days %}
+
+          ### {{ day }}
+
+          {% for e in entries if e.day == day %}
+          - **{{ e.lesson }}. Stunde** {{ e.subject }}
+            → Vertreter: {{ e.substitute }}
+            | Raum: {{ e.room }}
+            {% if e.info %}| _{{ e.info }}_{% endif %}
+
+          {% endfor %}
+            {% endfor %}
+          {% else %}
+          Keine Einträge vorhanden.
+          {% endif %}

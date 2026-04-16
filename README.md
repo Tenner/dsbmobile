@@ -119,6 +119,20 @@ Jeder Eintrag in `entries` enthält:
 
 ---
 
+## Beispiel-Dashboard
+
+Ein fertiges Dashboard liegt unter [`examples/dashboard.yaml`](examples/dashboard.yaml) und enthält:
+
+- Übersichtskarte mit Anzahl und Klasse
+- Vertretungstabelle (Markdown-Card, nur sichtbar wenn Vertretungen vorhanden)
+- "Alles normal"-Karte wenn keine Vertretungen
+- Verlaufsgraph der letzten 7 Tage
+- Detailansicht gruppiert nach Tag
+
+Einrichtung: Dashboard erstellen → Raw-Editor → YAML einfügen → Entity-IDs anpassen.
+
+---
+
 ## Beispiel-Automationen
 
 ### Push-Benachrichtigung bei neuen Vertretungen
