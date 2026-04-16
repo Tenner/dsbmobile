@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_CLASS
 from .dsb_api import DSBMobileAPI
@@ -86,10 +87,26 @@ class DSBMobileOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
-            # Update the config entry data with the new class
-            new_data = {**self._config_entry.data, CONF_CLASS: user_input[CONF_CLASS]}
+            old_classes = self._config_entry.data.get(CONF_CLASS, "")
+            new_classes = user_input[CONF_CLASS]
+
+            # Remove orphaned entities for classes that were removed
+            old_set = {c.strip() for c in old_classes.split(",") if c.strip()}
+            new_set = {c.strip() for c in new_classes.split(",") if c.strip()}
+            removed = old_set - new_set
+
+            if removed:
+                ent_reg = er.async_get(self.hass)
+                for entity in er.async_entries_for_config_entry(
+                    ent_reg, self._config_entry.entry_id
+                ):
+                    for cls in removed:
+                        if entity.unique_id.endswith(f"_vertretungsplan_{cls}"):
+                            _LOGGER.debug("Removing orphaned entity: %s", entity.entity_id)
+                            ent_reg.async_remove(entity.entity_id)
+
+            new_data = {**self._config_entry.data, CONF_CLASS: new_classes}
             self.hass.config_entries.async_update_entry(self._config_entry, data=new_data)
-            # Reload the integration so the sensor picks up the new class
             await self.hass.config_entries.async_reload(self._config_entry.entry_id)
             return self.async_create_entry(title="", data={})
 
