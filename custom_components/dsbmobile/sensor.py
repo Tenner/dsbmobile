@@ -18,7 +18,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_CLASS, DEFAULT_SCAN_INTERVAL
-from .dsb_api import DSBMobileAPI, SubstitutionEntry, CONTYPE_IMAGE
+from .dsb_api import DSBMobileAPI, SubstitutionEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +34,10 @@ async def async_setup_entry(
     class_filter = entry.data.get(CONF_CLASS, "")
 
     session = async_get_clientsession(hass)
-    api = DSBMobileAPI(username, password, session)
+    # Web API needs cookie jar for session management
+    jar = aiohttp.CookieJar()
+    web_session = aiohttp.ClientSession(cookie_jar=jar)
+    api = DSBMobileAPI(username, password, web_session)
 
     coordinator = DSBDataUpdateCoordinator(hass, api, class_filter)
 
@@ -118,19 +121,19 @@ class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], Sens
                     "info": e.info,
                 })
 
-        # Collect image plan URLs
-        image_plans = []
+        # Collect non-HTML plan URLs (images, documents)
+        other_plans = []
         for plan in self.coordinator.api.last_plans:
-            if plan.con_type == CONTYPE_IMAGE:
-                image_plans.append({
+            if not plan.is_html:
+                other_plans.append({
                     "title": plan.title,
                     "date": plan.date,
-                    "images": plan.image_urls,
+                    "url": plan.url,
                 })
 
         return {
             "class_filter": self._class_filter,
             "count": len(entries),
             "entries": entries,
-            "image_plans": image_plans,
+            "other_plans": other_plans,
         }

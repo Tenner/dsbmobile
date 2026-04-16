@@ -1,63 +1,82 @@
-"""Quick test script to check DSBmobile API responses."""
+"""Test the Web API endpoint found in configuration.js."""
 import asyncio
-import aiohttp
+import json
+import gzip
+import base64
+import uuid
+from datetime import datetime, timezone
 
-DSB_AUTH_URL = "https://mobileapi.dsbcontrol.de/authid"
-DSB_TIMETABLES_URL = "https://mobileapi.dsbcontrol.de/dsbtimetables"
+import aiohttp
+from bs4 import BeautifulSoup
+import getpass
+
+LOGIN_URL = "https://www.dsbmobile.de/Login.aspx"
+WEB_API_URL = "https://www.dsbmobile.de/jhw-1fd98248-440c-4283-bef6-dc82fe769b61.ashx/GetData"
 
 
 async def main():
-    username = input("Benutzer-ID: ")
-    password = input("Passwort: ")
+    username = input("Benutzer-ID: ").strip()
+    password = getpass.getpass("Passwort: ").strip()
 
-    async with aiohttp.ClientSession() as session:
-        # 1. Auth
-        params = {
-            "bundleid": "de.heinekingmedia.dsbmobile",
-            "appversion": "36",
-            "osversion": "30",
-            "pushid": "",
-            "user": username,
-            "password": password,
+    jar = aiohttp.CookieJar()
+    async with aiohttp.ClientSession(cookie_jar=jar) as session:
+        # 1. Login first to get session cookies
+        async with session.get(LOGIN_URL) as resp:
+            html = await resp.text()
+        soup = BeautifulSoup(html, "html.parser")
+        form = {
+            "__VIEWSTATE": soup.find("input", {"name": "__VIEWSTATE"})["value"],
+            "__VIEWSTATEGENERATOR": soup.find("input", {"name": "__VIEWSTATEGENERATOR"})["value"],
+            "__EVENTVALIDATION": soup.find("input", {"name": "__EVENTVALIDATION"})["value"],
+            "txtUser": username,
+            "txtPass": password,
+            "ctl03": "Anmelden",
         }
-        async with session.get(DSB_AUTH_URL, params=params) as resp:
-            token_raw = await resp.text()
-            print(f"\n[AUTH] Status: {resp.status}")
-            print(f"[AUTH] Token raw: {token_raw[:100]}")
-            token = token_raw.strip().strip('"')
-            if not token:
-                print("[AUTH] FEHLER: Leerer Token!")
+        async with session.post(LOGIN_URL, data=form, allow_redirects=True) as resp:
+            if "Login" in (await resp.text())[:300]:
+                print("Login fehlgeschlagen")
                 return
-            print(f"[AUTH] Token: {token[:20]}...")
+            print("Login OK")
 
-        # 2. Timetables
-        async with session.get(DSB_TIMETABLES_URL, params={"authid": token}) as resp:
-            print(f"\n[PLANS] Status: {resp.status}")
-            data = await resp.json(content_type=None)
-            print(f"[PLANS] Anzahl Items: {len(data) if data else 0}")
+        # 2. Call the Web API (same format as Android API)
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        payload = {
+            "UserId": username,
+            "UserPw": password,
+            "AppVersion": "2.3",
+            "Language": "de",
+            "OsVersion": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "AppId": str(uuid.uuid4()),
+            "Device": "WebApp",
+            "BundleId": "de.heinekingmedia.inhouse.dsbmobile.web",
+            "Date": now,
+            "LastUpdate": now,
+            "PushId": "",
+        }
 
-            if not data:
-                print("[PLANS] FEHLER: Keine Daten!")
-                return
+        compressed = gzip.compress(json.dumps(payload).encode("utf-8"))
+        encoded = base64.b64encode(compressed).decode("utf-8")
+        body = {"req": {"Data": encoded, "DataType": 1}}
 
-            for i, item in enumerate(data):
-                print(f"\n[PLAN {i}] Title: {item.get('Title')}")
-                print(f"[PLAN {i}] Date: {item.get('Date')}")
-                print(f"[PLAN {i}] ConType: {item.get('ConType')}")
-                childs = item.get("Childs", [])
-                print(f"[PLAN {i}] Childs: {len(childs)}")
-                for j, child in enumerate(childs):
-                    detail = child.get("Detail", "")
-                    print(f"  [CHILD {j}] ConType: {child.get('ConType')}, Detail: {detail[:120]}")
+        async with session.post(
+            WEB_API_URL,
+            json=body,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Referer": "https://www.dsbmobile.de/default.aspx",
+            },
+        ) as resp:
+            print(f"\nAPI Status: {resp.status}")
+            result = await resp.json(content_type=None)
 
-                    # 3. Fetch HTML
-                    if detail and detail.startswith("http"):
-                        async with session.get(detail) as html_resp:
-                            html = await html_resp.text()
-                            print(f"  [HTML] Status: {html_resp.status}, Length: {len(html)} chars")
-                            # Show first 500 chars
-                            print(f"  [HTML] Preview:\n{html[:500]}")
-                            print("  ...")
+            resp_data = result.get("d", "")
+            if resp_data:
+                decoded = gzip.decompress(base64.b64decode(resp_data))
+                data = json.loads(decoded)
+                print(json.dumps(data, indent=2, ensure_ascii=False))
+            else:
+                print("Response:")
+                print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 asyncio.run(main())

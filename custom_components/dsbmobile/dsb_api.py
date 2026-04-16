@@ -1,27 +1,23 @@
-"""API client for DSBmobile using the Mobile API."""
+"""API client for DSBmobile using the Web API."""
 from __future__ import annotations
 
 import logging
+import json
+import gzip
+import base64
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import aiohttp
 from bs4 import BeautifulSoup
 
-from .const import (
-    DSB_AUTH_URL,
-    DSB_TIMETABLES_URL,
-    DSB_BUNDLE_ID,
-    DSB_APP_VERSION,
-    DSB_OS_VERSION,
-)
+from .const import CONF_USERNAME, CONF_PASSWORD
 
 _LOGGER = logging.getLogger(__name__)
 
-# ConType values from DSBmobile API
-CONTYPE_CHILDS = 2   # Contains child items
-CONTYPE_HTML = 4     # Detail is a link to an HTML page
-CONTYPE_TEXT = 5     # Detail is plain text
-CONTYPE_IMAGE = 6    # Detail is a link to a PNG/GIF image
+LOGIN_URL = "https://www.dsbmobile.de/Login.aspx"
+WEB_API_URL = "https://www.dsbmobile.de/jhw-1fd98248-440c-4283-bef6-dc82fe769b61.ashx/GetData"
 
 
 @dataclass
@@ -40,184 +36,209 @@ class SubstitutionEntry:
 
 @dataclass
 class PlanInfo:
-    """Metadata about a substitution plan."""
+    """Metadata about a plan."""
 
     title: str
     date: str
     url: str
-    con_type: int
-    image_urls: list[str] = field(default_factory=list)
+    is_html: bool = False
 
 
 class DSBMobileAPI:
-    """Client for the DSBmobile Mobile API."""
+    """Client for DSBmobile using the Web API."""
 
     def __init__(self, username: str, password: str, session: aiohttp.ClientSession) -> None:
         self._username = username
         self._password = password
         self._session = session
-        self._token: str | None = None
+        self._logged_in = False
         self.last_plans: list[PlanInfo] = []
 
-    async def authenticate(self) -> bool:
-        """Authenticate and get a session token."""
-        params = {
-            "bundleid": DSB_BUNDLE_ID,
-            "appversion": DSB_APP_VERSION,
-            "osversion": DSB_OS_VERSION,
-            "pushid": "",
-            "user": self._username,
-            "password": self._password,
-        }
+    async def _web_login(self) -> bool:
+        """Login via the web form to get session cookies."""
         try:
-            async with self._session.get(DSB_AUTH_URL, params=params) as resp:
-                if resp.status != 200:
-                    _LOGGER.error("Auth returned status %s", resp.status)
-                    return False
-                token = await resp.text()
-                _LOGGER.debug("Auth response: %s", token[:50] if token else "(empty)")
-                token = token.strip().strip('"')
-                if not token:
-                    _LOGGER.error("Auth returned empty token")
-                    return False
-                self._token = token
-                _LOGGER.debug("Authenticated successfully, token: %s...", token[:8])
-                return True
+            async with self._session.get(LOGIN_URL) as resp:
+                html = await resp.text()
+
+            soup = BeautifulSoup(html, "html.parser")
+            vs = soup.find("input", {"name": "__VIEWSTATE"})
+            vsg = soup.find("input", {"name": "__VIEWSTATEGENERATOR"})
+            ev = soup.find("input", {"name": "__EVENTVALIDATION"})
+
+            if not vs or not ev:
+                _LOGGER.error("Login page missing form fields")
+                return False
+
+            form = {
+                "__VIEWSTATE": vs["value"],
+                "__VIEWSTATEGENERATOR": vsg["value"] if vsg else "",
+                "__EVENTVALIDATION": ev["value"],
+                "txtUser": self._username,
+                "txtPass": self._password,
+                "ctl03": "Anmelden",
+            }
+
+            async with self._session.post(LOGIN_URL, data=form, allow_redirects=True) as resp:
+                text = await resp.text()
+                if "default.aspx" in str(resp.url) or "<title>DSBmobile</title>" in text:
+                    _LOGGER.debug("Web login successful")
+                    self._logged_in = True
+                    return True
+                _LOGGER.error("Web login failed — still on login page")
+                return False
+
         except aiohttp.ClientError as err:
-            _LOGGER.error("Authentication failed: %s", err)
+            _LOGGER.error("Web login error: %s", err)
             return False
 
-    async def get_plans(self) -> list[PlanInfo]:
-        """Fetch timetable plan URLs and metadata."""
-        if not self._token:
-            if not await self.authenticate():
-                return []
+    async def authenticate(self) -> bool:
+        """Authenticate via web login + Web API call."""
+        if not await self._web_login():
+            return False
 
-        params = {"authid": self._token}
+        # Test the API call
+        data = await self._call_web_api()
+        return data is not None and data.get("Resultcode") == 0
+
+    async def _call_web_api(self) -> dict | None:
+        """Call the Web API GetData endpoint."""
+        if not self._logged_in:
+            if not await self._web_login():
+                return None
+
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        payload = {
+            "UserId": self._username,
+            "UserPw": self._password,
+            "AppVersion": "2.3",
+            "Language": "de",
+            "OsVersion": "Mozilla/5.0",
+            "AppId": str(uuid.uuid4()),
+            "Device": "WebApp",
+            "BundleId": "de.heinekingmedia.inhouse.dsbmobile.web",
+            "Date": now,
+            "LastUpdate": now,
+            "PushId": "",
+        }
+
+        compressed = gzip.compress(json.dumps(payload).encode("utf-8"))
+        encoded = base64.b64encode(compressed).decode("utf-8")
+        body = {"req": {"Data": encoded, "DataType": 1}}
+
         try:
-            async with self._session.get(DSB_TIMETABLES_URL, params=params) as resp:
+            async with self._session.post(
+                WEB_API_URL,
+                json=body,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Referer": "https://www.dsbmobile.de/default.aspx",
+                },
+            ) as resp:
                 if resp.status != 200:
-                    return []
-                data = await resp.json(content_type=None)
-        except (aiohttp.ClientError, ValueError) as err:
-            _LOGGER.error("Failed to fetch plans: %s", err)
+                    _LOGGER.error("Web API returned status %s", resp.status)
+                    return None
+
+                result = await resp.json(content_type=None)
+                resp_data = result.get("d", "")
+                if not resp_data:
+                    _LOGGER.error("Web API returned no data: %s", result)
+                    return None
+
+                decoded = gzip.decompress(base64.b64decode(resp_data))
+                data = json.loads(decoded)
+
+                if data.get("Resultcode") != 0:
+                    _LOGGER.error("Web API error: %s", data.get("ResultStatusInfo"))
+                    return None
+
+                _LOGGER.debug("Web API call successful")
+                return data
+
+        except (aiohttp.ClientError, Exception) as err:
+            _LOGGER.error("Web API call failed: %s", err)
+            return None
+
+    async def get_plans(self) -> list[PlanInfo]:
+        """Extract plan URLs from the Web API response."""
+        data = await self._call_web_api()
+        if not data:
             return []
 
-        _LOGGER.debug("Timetables response: %d items", len(data) if data else 0)
         plans: list[PlanInfo] = []
 
-        for item in data or []:
-            parent_type = item.get("ConType", 0)
-            title = item.get("Title", "")
-            date = item.get("Date", "")
-            childs = item.get("Childs", [])
+        for menu in data.get("ResultMenuItems", []):
+            for section in menu.get("Childs", []):
+                method = section.get("MethodName", "")
+                root = section.get("Root", {})
 
-            _LOGGER.debug(
-                "Plan item: title=%s, ConType=%s, childs=%d",
-                title, parent_type, len(childs),
-            )
+                _LOGGER.debug("Section: %s (method=%s)", section.get("Title"), method)
 
-            if parent_type == CONTYPE_CHILDS:
-                # Parent with children — collect all child URLs
-                image_urls = []
-                html_url = ""
-                child_type = 0
+                for item in root.get("Childs", []):
+                    title = item.get("Title", "")
+                    date = item.get("Date", "")
 
-                for child in childs:
-                    detail = child.get("Detail", "")
-                    ct = child.get("ConType", 0)
-                    _LOGGER.debug("  Child: ConType=%s, Detail=%s", ct, detail[:80] if detail else "")
+                    for child in item.get("Childs", []):
+                        detail = child.get("Detail", "")
+                        if not detail:
+                            continue
 
-                    if not detail:
-                        continue
+                        is_html = detail.lower().endswith((".htm", ".html"))
+                        plans.append(PlanInfo(
+                            title=child.get("Title", title),
+                            date=date,
+                            url=detail,
+                            is_html=is_html,
+                        ))
+                        _LOGGER.debug(
+                            "  Found: %s (html=%s) -> %s",
+                            child.get("Title", ""), is_html, detail[:80],
+                        )
 
-                    child_type = ct
-                    if ct == CONTYPE_IMAGE:
-                        image_urls.append(detail)
-                    elif ct == CONTYPE_HTML:
-                        html_url = detail
-
-                if html_url:
-                    plans.append(PlanInfo(
-                        title=title, date=date, url=html_url,
-                        con_type=CONTYPE_HTML,
-                    ))
-                elif image_urls:
-                    plans.append(PlanInfo(
-                        title=title, date=date, url=image_urls[0],
-                        con_type=CONTYPE_IMAGE, image_urls=image_urls,
-                    ))
-            else:
-                # Direct item
-                detail = item.get("Detail", "")
-                if detail:
-                    plans.append(PlanInfo(
-                        title=title, date=date, url=detail,
-                        con_type=parent_type,
-                    ))
-
-        _LOGGER.debug("Found %d plans", len(plans))
         self.last_plans = plans
+        _LOGGER.debug("Total plans found: %d", len(plans))
         return plans
 
     async def get_substitutions(self, class_filter: str = "") -> list[SubstitutionEntry]:
-        """Fetch and parse substitution entries, optionally filtered by class."""
+        """Fetch and parse HTML substitution plans."""
         plans = await self.get_plans()
         entries: list[SubstitutionEntry] = []
 
         for plan in plans:
-            if plan.con_type == CONTYPE_IMAGE:
-                _LOGGER.debug(
-                    "Plan '%s' is image-based (%d images), skipping HTML parse",
-                    plan.title, len(plan.image_urls),
-                )
-                continue
-
-            # Also skip if URL looks like an image regardless of ConType
-            url_lower = plan.url.lower()
-            if url_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp")):
-                _LOGGER.debug("Plan '%s' URL ends with image extension, skipping: %s", plan.title, plan.url)
-                # Reclassify as image plan so it shows up in attributes
-                plan.con_type = CONTYPE_IMAGE
-                plan.image_urls = [plan.url]
+            if not plan.is_html:
+                _LOGGER.debug("Skipping non-HTML plan: %s -> %s", plan.title, plan.url[:60])
                 continue
 
             try:
                 async with self._session.get(plan.url) as resp:
                     if resp.status != 200:
+                        _LOGGER.warning("Plan %s returned status %s", plan.url, resp.status)
                         continue
 
-                    # Check Content-Type before reading as text
                     content_type = resp.headers.get("Content-Type", "")
-                    _LOGGER.debug("Plan '%s' Content-Type: %s", plan.title, content_type)
-
                     if "image" in content_type:
-                        _LOGGER.debug("Plan '%s' is an image (Content-Type), skipping", plan.title)
-                        plan.con_type = CONTYPE_IMAGE
-                        plan.image_urls = [plan.url]
-                        continue
-
-                    if "text/html" not in content_type and "text/plain" not in content_type:
-                        _LOGGER.debug("Plan '%s' has unexpected Content-Type: %s, skipping", plan.title, content_type)
+                        _LOGGER.debug("Skipping image content: %s", plan.url)
+                        plan.is_html = False
                         continue
 
                     html = await resp.text()
-            except aiohttp.ClientError as err:
-                _LOGGER.warning("Failed to fetch plan from %s: %s", plan.url, err)
+                    _LOGGER.debug("Fetched HTML plan: %s (%d chars)", plan.title, len(html))
+
+            except UnicodeDecodeError:
+                _LOGGER.warning("Plan %s is binary, skipping", plan.title)
+                plan.is_html = False
                 continue
-            except UnicodeDecodeError as err:
-                _LOGGER.warning("Plan '%s' is not text (decode error), treating as image: %s", plan.title, err)
-                plan.con_type = CONTYPE_IMAGE
-                plan.image_urls = [plan.url]
+            except aiohttp.ClientError as err:
+                _LOGGER.warning("Failed to fetch %s: %s", plan.url, err)
                 continue
 
             entries.extend(self._parse_plan_html(html, class_filter))
 
+        _LOGGER.debug("Total substitution entries: %d (filter='%s')", len(entries), class_filter)
         return entries
 
     @staticmethod
     def _parse_plan_html(html: str, class_filter: str) -> list[SubstitutionEntry]:
-        """Parse the substitution plan HTML (Untis format)."""
+        """Parse Untis substitution plan HTML."""
         soup = BeautifulSoup(html, "html.parser")
         results: list[SubstitutionEntry] = []
         current_day = ""

@@ -26,7 +26,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, str]:
     """Validate the user input by trying to authenticate."""
-    async with aiohttp.ClientSession() as session:
+    jar = aiohttp.CookieJar()
+    async with aiohttp.ClientSession(cookie_jar=jar) as session:
         api = DSBMobileAPI(data[CONF_USERNAME], data[CONF_PASSWORD], session)
         if not await api.authenticate():
             raise InvalidAuth
