@@ -257,6 +257,7 @@ class DSBMobileAPI:
         - Table: table.mon_list
         - Columns: Art | Klasse(n) | Stunde | (Fach) | Raum | Vertr. von | (Le.) nach | Text
         - Header row uses <th>, data rows use <td>
+        - <s> tags indicate old/cancelled values (converted to ~~strikethrough~~)
         """
         soup = BeautifulSoup(html, "html.parser")
         results: list[SubstitutionEntry] = []
@@ -292,7 +293,7 @@ class DSBMobileAPI:
                 continue
 
             # Untis columns: Art | Klasse(n) | Stunde | (Fach) | Raum | Vertr. von | (Le.) nach | Text
-            c = [cell.get_text(strip=True) for cell in cells]
+            c = [DSBMobileAPI._cell_text(cell) for cell in cells]
             entry = SubstitutionEntry(
                 day=current_day,
                 art=c[0] if len(c) > 0 else "",
@@ -308,4 +309,19 @@ class DSBMobileAPI:
             results.append(entry)
 
         return results
+
+    @staticmethod
+    def _cell_text(cell) -> str:
+        """Extract text from a table cell, converting <s> to ~~strikethrough~~."""
+        parts = []
+        for child in cell.children:
+            if hasattr(child, "name") and child.name == "s":
+                text = child.get_text(strip=True)
+                if text:
+                    parts.append(f"~~{text}~~")
+            else:
+                text = child.get_text(strip=True) if hasattr(child, "get_text") else str(child).strip()
+                if text and text != "\xa0":
+                    parts.append(text)
+        return " ".join(parts) if parts else ""
 
