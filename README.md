@@ -8,11 +8,14 @@ Custom Integration für [Home Assistant](https://www.home-assistant.io/), die de
 
 ## Features
 
-- Automatischer Abruf des Vertretungsplans über die offizielle DSBmobile Mobile API
+- Automatischer Abruf des Vertretungsplans über die DSBmobile Web API
+- Unterstützt HTML-Pläne (Untis `subst_*.htm`) und erkennt Bild-/Dokumentpläne
 - Filterung nach Klasse (z.B. `7b`, `10a`)
-- Aktualisierung alle 30 Minuten (konfigurierbar)
+- Klasse nachträglich änderbar über Konfigurieren (Options Flow)
+- Aktualisierung alle 30 Minuten
 - Sensor-State = Anzahl der Vertretungseinträge
 - Detaillierte Einträge (Tag, Stunde, Fach, Vertreter, Raum, Hinweis) als Sensor-Attribute
+- Nicht-HTML-Pläne (Bilder, Dokumente) als `other_plans` Attribut verfügbar
 - Vollständige UI-Konfiguration (kein YAML nötig)
 - Deutsche und englische Übersetzung
 
@@ -104,6 +107,7 @@ Der Sensor stellt folgende Attribute bereit:
 | `class_filter` | String | Die konfigurierte Klasse                  |
 | `count`        | Int    | Anzahl der Einträge                       |
 | `entries`      | Liste  | Liste aller Vertretungseinträge (Details) |
+| `other_plans`  | Liste  | Nicht-HTML-Pläne (Bilder, Dokumente)      |
 
 Jeder Eintrag in `entries` enthält:
 
@@ -187,16 +191,18 @@ automation:
 
 ### API
 
-Die Integration nutzt die DSBmobile **Mobile API** (die einfachste und stabilste der verfügbaren APIs):
+Die Integration nutzt die DSBmobile **Web API** — den gleichen Endpoint, den auch die DSBmobile-Webseite verwendet:
 
-1. **Authentifizierung**: `GET https://mobileapi.dsbcontrol.de/authid?user=...&password=...`
-   → Gibt einen Session-Token (UUID) zurück
+1. **Web Login**: `POST https://www.dsbmobile.de/Login.aspx` mit ASP.NET Formular (ViewState, EventValidation)
+   → Setzt Session-Cookies
 
-2. **Vertretungspläne abrufen**: `GET https://mobileapi.dsbcontrol.de/dsbtimetables?authid=TOKEN`
-   → Gibt JSON mit Plan-Metadaten und URLs zu den HTML-Plänen zurück
+2. **Daten abrufen**: `POST https://www.dsbmobile.de/jhw-*.ashx/GetData` mit gzip-komprimiertem, base64-kodiertem JSON-Payload
+   → Gibt komprimierte JSON-Antwort mit allen Plänen, Aushängen und Dokumenten zurück
 
-3. **HTML parsen**: Die HTML-Seiten (typisches Untis-Format) werden mit BeautifulSoup geparst.
-   Tabellenzeilen werden nach der konfigurierten Klasse gefiltert.
+3. **HTML-Pläne laden**: `GET https://dsbmobile.de/data/.../subst_001.htm`
+   → Untis-HTML wird mit BeautifulSoup geparst und nach Klasse gefiltert
+
+Die Web API ist zuverlässiger als die Mobile API, da sie den gleichen Datenkanal wie die offizielle Webseite nutzt.
 
 ### Architektur
 
@@ -215,17 +221,17 @@ graph TB
     end
 
     subgraph DSBmobile Server
-        AUTH[Auth Endpoint<br><i>mobileapi.dsbcontrol.de/authid</i>]
-        TT[Timetables Endpoint<br><i>mobileapi.dsbcontrol.de/dsbtimetables</i>]
-        HTML[Vertretungsplan HTML<br><i>light.dsbcontrol.de</i>]
+        LOGIN[Web Login<br><i>dsbmobile.de/Login.aspx</i>]
+        WEBAPI[Web API<br><i>dsbmobile.de/jhw-*.ashx/GetData</i>]
+        HTML[Vertretungsplan HTML<br><i>dsbmobile.de/data/.../subst_001.htm</i>]
     end
 
     CF -->|Zugangsdaten validieren| API
     CO -->|alle 30 Min| API
-    API -->|1. Login| AUTH
-    AUTH -->|Token UUID| API
-    API -->|2. Pläne abrufen| TT
-    TT -->|JSON mit URLs| API
+    API -->|1. POST Login + Cookies| LOGIN
+    LOGIN -->|Session Cookie| API
+    API -->|2. POST gzip+base64| WEBAPI
+    WEBAPI -->|JSON mit Plan-URLs| API
     API -->|3. HTML laden| HTML
     HTML -->|Untis HTML| PA
     PA -->|Einträge gefiltert nach Klasse| CO
@@ -240,18 +246,20 @@ sequenceDiagram
     participant HA as Home Assistant
     participant CO as Coordinator
     participant API as DSBMobileAPI
-    participant DSB as DSBmobile Server
-    participant HTML as Plan HTML Server
+    participant WEB as dsbmobile.de
+    participant HTML as Plan HTML
 
     HA->>CO: Update (alle 30 Min)
     CO->>API: get_substitutions("7b")
-    API->>DSB: GET /authid?user=...&password=...
-    DSB-->>API: "a1b2c3d4-..."  (Token)
-    API->>DSB: GET /dsbtimetables?authid=TOKEN
-    DSB-->>API: JSON [{Title, Childs: [{Detail: URL}]}]
-    loop Für jeden Plan
-        API->>HTML: GET Vertretungen.htm
-        HTML-->>API: HTML (Untis Tabelle)
+    API->>WEB: GET /Login.aspx
+    WEB-->>API: HTML + ViewState
+    API->>WEB: POST /Login.aspx (Credentials)
+    WEB-->>API: Session Cookie + Redirect
+    API->>WEB: POST /jhw-*.ashx/GetData (gzip+base64)
+    WEB-->>API: JSON (komprimiert) mit Plan-URLs
+    loop Für jeden HTML-Plan (subst_*.htm)
+        API->>HTML: GET /data/.../subst_001.htm
+        HTML-->>API: Untis HTML Tabelle
         API->>API: Parse & Filter nach "7b"
     end
     API-->>CO: List[SubstitutionEntry]
@@ -266,11 +274,21 @@ classDiagram
         -username: str
         -password: str
         -session: aiohttp.ClientSession
-        -token: str
+        -logged_in: bool
+        +last_plans: list~PlanInfo~
         +authenticate() bool
-        +get_plans() list~dict~
+        -_web_login() bool
+        -_call_web_api() dict
+        +get_plans() list~PlanInfo~
         +get_substitutions(class_filter) list~SubstitutionEntry~
         -_parse_plan_html(html, filter) list~SubstitutionEntry~
+    }
+
+    class PlanInfo {
+        +title: str
+        +date: str
+        +url: str
+        +is_html: bool
     }
 
     class SubstitutionEntry {
@@ -299,10 +317,16 @@ classDiagram
         +async_step_user(user_input) ConfigFlowResult
     }
 
+    class DSBMobileOptionsFlow {
+        +async_step_init(user_input) ConfigFlowResult
+    }
+
+    DSBMobileAPI --> PlanInfo : erzeugt
     DSBMobileAPI --> SubstitutionEntry : erzeugt
     DSBDataUpdateCoordinator --> DSBMobileAPI : nutzt
     DSBVertretungsplanSensor --> DSBDataUpdateCoordinator : liest von
     DSBMobileConfigFlow --> DSBMobileAPI : validiert mit
+    DSBMobileConfigFlow --> DSBMobileOptionsFlow : Options Flow
 ```
 
 ---
@@ -316,6 +340,8 @@ classDiagram
 | Sensor zeigt 0, obwohl es Vertretungen gibt | Klasse exakt so eingeben wie im Plan (z.B. `7b` nicht `7B` oder `Klasse 7b`) |
 | Keine Aktualisierung             | Unter Entwicklerwerkzeuge → Dienste → `homeassistant.update_entity` manuell triggern |
 | Fehler im Log                    | Logger aktivieren: `custom_components.dsbmobile: debug` in `configuration.yaml` |
+| Update von v1.x auf v2.0        | Integration löschen und neu einrichten (Auth-Methode hat sich geändert) |
+| Klasse ändern                    | Einstellungen → Geräte & Dienste → DSBmobile → Konfigurieren          |
 
 ### Debug-Logging aktivieren
 
