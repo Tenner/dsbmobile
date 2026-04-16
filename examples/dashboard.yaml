@@ -1,15 +1,10 @@
 ###############################################################################
-# DSBmobile Vertretungsplan – Beispiel Dashboard
+# DSBmobile Vertretungsplan – Dashboard
 #
-# Einrichtung:
-#   1. In Home Assistant: Einstellungen → Dashboards → Dashboard hinzufügen
-#   2. Dashboard öffnen → Drei Punkte → Raw-Konfigurationseditor
-#   3. Diesen YAML-Inhalt einfügen
-#   4. Entity-IDs anpassen (sensor.vertretungsplan_7b → deine Klasse)
-#
-# Voraussetzung:
+# Voraussetzungen:
 #   - DSBmobile Integration installiert und eingerichtet
-#   - Optional: card-mod (HACS) für erweiterte Styles
+#   - HACS Cards: mushroom-cards, card-mod
+#   - Entity-IDs anpassen (sensor.vertretungsplan_08b → deine Klasse)
 ###############################################################################
 
 title: Vertretungsplan
@@ -19,86 +14,126 @@ views:
     path: vertretungsplan
     cards:
 
-      # ── Übersichtskarte ──────────────────────────────────────────────
-      - type: entities
-        title: "📋 Vertretungsplan Übersicht"
-        show_header_toggle: false
-        entities:
-          - entity: sensor.vertretungsplan_7b
-            name: Anzahl Vertretungen
-            icon: mdi:counter
-          - type: attribute
-            entity: sensor.vertretungsplan_7b
-            attribute: class_filter
-            name: Klasse
-            icon: mdi:account-group
+      - type: vertical-stack
+        cards:
 
-      # ── Statusanzeige (groß) ─────────────────────────────────────────
-      - type: conditional
-        conditions:
-          - condition: numeric_state
-            entity: sensor.vertretungsplan_7b
-            above: 0
-        card:
-          type: markdown
-          title: "🔔 Aktuelle Vertretungen"
-          content: >
-            {% set entries = state_attr('sensor.vertretungsplan_7b', 'entries') %}
-            {% if entries and entries | length > 0 %}
+          # ── Header Card ──────────────────────────────────────────────
+          - type: custom:mushroom-template-card
+            primary: Vertretungsplan
+            secondary: >
+              {% set count = states('sensor.vertretungsplan_08b') | int(0) %}
+              {% if count > 0 %}
+                {{ count }} Vertretung{{ 'en' if count > 1 else '' }} für Klasse 08b
+              {% else %}
+                Keine Vertretungen für Klasse 08b
+              {% endif %}
+              · Stand {{ state_attr('sensor.vertretungsplan_08b', 'other_plans')[0].date if state_attr('sensor.vertretungsplan_08b', 'other_plans') else 'unbekannt' }}
+            icon: mdi:school
+            icon_color: >
+              {% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}
+                red
+              {% else %}
+                green
+              {% endif %}
+            card_mod:
+              style:
+                mushroom-state-info$: |
+                  .secondary {
+                    font-size: 14px !important;
+                  }
+                .: |
+                  ha-card {
+                    background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 50%, #1f3044 100%);
+                    border-radius: 20px;
+                    border: none;
+                    --primary-text-color: #ffffff;
+                    --secondary-text-color: rgba(255,255,255,0.6);
+                  }
+                  mushroom-state-info {
+                    --card-primary-font-size: 22px;
+                    --card-primary-font-weight: 700;
+                  }
+                  mushroom-shape-icon {
+                    --shape-color: rgba(255,255,255,0.12) !important;
+                    --icon-size: 32px;
+                  }
 
-            | Tag | Std | Fach | Vertreter | Raum | Info |
-            |-----|-----|------|-----------|------|------|
-            {% for e in entries %}
-            | {{ e.day }} | {{ e.lesson }} | {{ e.subject }} | {{ e.substitute }} | {{ e.room }} | {{ e.info }} |
-            {% endfor %}
+          # ── Vertretungsliste ─────────────────────────────────────────
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.vertretungsplan_08b
+                above: 0
+            card:
+              type: markdown
+              content: >
+                {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
+                {% if entries and entries | length > 0 %}
+                  {% set days = entries | map(attribute='day') | unique | list %}
+                  {% for day in days %}
 
-            {% else %}
-            Keine Vertretungen vorhanden.
-            {% endif %}
+                ### 📅 {{ day }}
 
-      # ── Keine Vertretungen ───────────────────────────────────────────
-      - type: conditional
-        conditions:
-          - condition: numeric_state
-            entity: sensor.vertretungsplan_7b
-            below: 1
-        card:
-          type: markdown
-          title: "✅ Alles normal"
-          content: >
-            Keine Vertretungen für Klasse
-            **{{ state_attr('sensor.vertretungsplan_7b', 'class_filter') }}**.
+                {% for e in entries if e.day == day %}
 
+                <table style="width:100%; margin-bottom:8px; border-collapse:collapse;">
+                <tr style="background: rgba(255,255,255,0.05); border-radius:8px;">
+                <td style="padding:10px 14px; width:50px; text-align:center; font-size:20px; font-weight:700; color:#ee7f00;">{{ e.lesson }}</td>
+                <td style="padding:10px 14px;">
+                <div style="font-weight:600; font-size:15px;">{{ e.subject }}{% if e.info %} · <span style="color:#ee7f00;">{{ e.info }}</span>{% endif %}</div>
+                <div style="color:rgba(255,255,255,0.5); font-size:13px;">{{ e.substitute }}{% if e.room %} · Raum {{ e.room }}{% endif %} · {{ e.class }}</div>
+                </td>
+                </tr>
+                </table>
 
-            Nächste Aktualisierung in ~30 Minuten.
+                {% endfor %}
+                  {% endfor %}
+                {% endif %}
+              card_mod:
+                style: |
+                  ha-card {
+                    background: linear-gradient(135deg, rgba(238,127,0,0.08) 0%, rgba(238,127,0,0.02) 100%);
+                    border: 1px solid rgba(238,127,0,0.15);
+                    border-radius: 16px;
+                  }
+                  h3 {
+                    color: rgba(255,255,255,0.7) !important;
+                    font-size: 14px !important;
+                    font-weight: 600 !important;
+                    margin-top: 16px !important;
+                    margin-bottom: 4px !important;
+                  }
 
-      # ── Verlauf der letzten 7 Tage ──────────────────────────────────
-      - type: history-graph
-        title: "📊 Vertretungen letzte 7 Tage"
-        hours_to_show: 168
-        entities:
-          - entity: sensor.vertretungsplan_7b
-            name: Anzahl Vertretungen
+          # ── Alles normal Card ────────────────────────────────────────
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.vertretungsplan_08b
+                below: 1
+            card:
+              type: custom:mushroom-template-card
+              primary: Alles nach Plan
+              secondary: Keine Vertretungen eingetragen
+              icon: mdi:check-circle
+              icon_color: green
+              card_mod:
+                style: |
+                  ha-card {
+                    background: linear-gradient(135deg, rgba(102,187,106,0.1) 0%, rgba(102,187,106,0.03) 100%);
+                    border: 1px solid rgba(102,187,106,0.15);
+                    border-radius: 16px;
+                  }
 
-      # ── Detailkarten pro Tag (automatisch) ───────────────────────────
-      - type: markdown
-        title: "📅 Details nach Tag"
-        content: >
-          {% set entries = state_attr('sensor.vertretungsplan_7b', 'entries') %}
-          {% if entries and entries | length > 0 %}
-            {% set days = entries | map(attribute='day') | unique | list %}
-            {% for day in days %}
-
-          ### {{ day }}
-
-          {% for e in entries if e.day == day %}
-          - **{{ e.lesson }}. Stunde** {{ e.subject }}
-            → Vertreter: {{ e.substitute }}
-            | Raum: {{ e.room }}
-            {% if e.info %}| _{{ e.info }}_{% endif %}
-
-          {% endfor %}
-            {% endfor %}
-          {% else %}
-          Keine Einträge vorhanden.
-          {% endif %}
+          # ── Verlauf ──────────────────────────────────────────────────
+          - type: history-graph
+            hours_to_show: 168
+            entities:
+              - entity: sensor.vertretungsplan_08b
+                name: Vertretungen 08b
+            card_mod:
+              style: |
+                ha-card {
+                  background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 100%);
+                  border-radius: 16px;
+                  border: 1px solid rgba(255,255,255,0.05);
+                }
