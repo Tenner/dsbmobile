@@ -9,15 +9,17 @@ Custom Integration für [Home Assistant](https://www.home-assistant.io/), die de
 ## Features
 
 - Automatischer Abruf des Vertretungsplans über die DSBmobile Web API
-- Unterstützt HTML-Pläne (Untis `subst_*.htm`) und erkennt Bild-/Dokumentpläne
-- Filterung nach Klasse (z.B. `7b`, `10a`)
+- Untis HTML-Parser (`subst_*.htm`) mit Unterstützung für durchgestrichenen Text (~~alt~~ → neu)
+- Mehrere Klassen kommagetrennt konfigurierbar (z.B. `08b, 05a`) — pro Klasse ein eigener Sensor
 - Klasse nachträglich änderbar über Konfigurieren (Options Flow)
+- Verwaiste Sensoren werden beim Entfernen von Klassen automatisch aufgeräumt
 - Aktualisierung alle 30 Minuten
 - Sensor-State = Anzahl der Vertretungseinträge
-- Detaillierte Einträge (Tag, Stunde, Fach, Vertreter, Raum, Hinweis) als Sensor-Attribute
 - Nicht-HTML-Pläne (Bilder, Dokumente) als `other_plans` Attribut verfügbar
+- iso-8859-1 Encoding-Unterstützung für Untis HTML
 - Vollständige UI-Konfiguration (kein YAML nötig)
 - Deutsche und englische Übersetzung
+- Breitbild-Dashboard (3-Spalten Grid, ein Tag pro Spalte)
 
 ## Voraussetzungen
 
@@ -29,9 +31,9 @@ Custom Integration für [Home Assistant](https://www.home-assistant.io/), die de
 ```
 custom_components/dsbmobile/
 ├── __init__.py            # Integration Setup & Lifecycle
-├── const.py               # Konstanten (API-URLs, Defaults)
-├── dsb_api.py             # API-Client & HTML-Parser
-├── config_flow.py         # UI-Konfiguration (Config Flow)
+├── const.py               # Konstanten & Defaults
+├── dsb_api.py             # Web API Client & Untis HTML-Parser
+├── config_flow.py         # UI-Konfiguration (Config Flow + Options Flow)
 ├── sensor.py              # Sensor-Entity mit DataUpdateCoordinator
 ├── manifest.json          # HA Integration Manifest
 ├── strings.json           # UI-Texte (Fallback)
@@ -77,30 +79,29 @@ custom_components/dsbmobile/
 2. Nach `DSBmobile` suchen
 3. Zugangsdaten eingeben:
 
-   | Feld          | Beschreibung                                      | Pflicht |
-   |---------------|---------------------------------------------------|---------|
-   | Benutzer-ID   | Die DSBmobile Kennung (von der Schule erhalten)   | Ja      |
-   | Passwort      | Das zugehörige Passwort                            | Ja      |
-   | Klasse        | Klasse zum Filtern, z.B. `7b` oder `10a`          | Nein    |
+   | Feld          | Beschreibung                                                  | Pflicht |
+   |---------------|---------------------------------------------------------------|---------|
+   | Benutzer-ID   | Die DSBmobile Kennung (von der Schule erhalten)               | Ja      |
+   | Passwort      | Das zugehörige Passwort                                       | Ja      |
+   | Klasse(n)     | Kommagetrennt, z.B. `08b` oder `08b, 05a` (leer = alle)      | Nein    |
 
-4. Die Integration prüft die Zugangsdaten sofort. Bei Erfolg wird der Sensor angelegt.
+4. Die Integration prüft die Zugangsdaten sofort. Bei Erfolg werden die Sensoren angelegt.
+5. Klasse(n) nachträglich ändern: **Einstellungen → Geräte & Dienste → DSBmobile → Konfigurieren**
 
 ---
 
 ## Sensor
 
-Nach der Einrichtung wird ein Sensor erstellt:
+Pro konfigurierter Klasse wird ein Sensor erstellt:
 
 | Eigenschaft     | Wert                                                |
 |-----------------|-----------------------------------------------------|
-| Entity-ID       | `sensor.vertretungsplan_7b` (je nach Klasse)        |
+| Entity-ID       | `sensor.vertretungsplan_08b` (je nach Klasse)       |
 | State           | Anzahl der aktuellen Vertretungseinträge (Integer)  |
 | Icon            | `mdi:school`                                        |
 | Aktualisierung  | Alle 30 Minuten                                     |
 
 ### Attribute
-
-Der Sensor stellt folgende Attribute bereit:
 
 | Attribut       | Typ    | Beschreibung                              |
 |----------------|--------|-------------------------------------------|
@@ -109,31 +110,33 @@ Der Sensor stellt folgende Attribute bereit:
 | `entries`      | Liste  | Liste aller Vertretungseinträge (Details) |
 | `other_plans`  | Liste  | Nicht-HTML-Pläne (Bilder, Dokumente)      |
 
-Jeder Eintrag in `entries` enthält:
+Jeder Eintrag in `entries` enthält (Untis-Spalten):
 
-| Feld         | Beispiel              |
-|--------------|-----------------------|
-| `day`        | `Montag 21.04.2025`   |
-| `class`      | `7b`                  |
-| `lesson`     | `3`                   |
-| `subject`    | `Mathe`               |
-| `substitute` | `Fr. Müller`          |
-| `room`       | `A204`                |
-| `info`       | `Raumänderung`        |
+| Feld         | Beispiel                    | Beschreibung                          |
+|--------------|-----------------------------|---------------------------------------|
+| `day`        | `16.4.2026 Donnerstag`      | Tag aus `div.mon_title`               |
+| `art`        | `Entfall`                   | Art der Änderung                      |
+| `class`      | `08b`                       | Betroffene Klasse(n)                  |
+| `lesson`     | `3`                         | Stunde                                |
+| `subject`    | `~~Ma~~ De`                 | Fach (durchgestrichen = altes Fach)   |
+| `room`       | `A204`                      | Raum                                  |
+| `vertr_von`  | `Do-16.4. / 6`              | Vertreten von                         |
+| `nach`       | `Entfall für Lehrer`        | (Le.) nach                            |
+| `text`       | `Klausur wird geschrieben`  | Zusatztext                            |
 
 ---
 
 ## Beispiel-Dashboard
 
-Ein fertiges Dashboard liegt unter [`examples/dashboard.yaml`](examples/dashboard.yaml) und enthält:
+Ein fertiges Breitbild-Dashboard (1920x1200) liegt unter [`examples/dashboard.yaml`](examples/dashboard.yaml):
 
-- Übersichtskarte mit Anzahl und Klasse
-- Vertretungstabelle (Markdown-Card, nur sichtbar wenn Vertretungen vorhanden)
-- "Alles normal"-Karte wenn keine Vertretungen
-- Verlaufsgraph der letzten 7 Tage
-- Detailansicht gruppiert nach Tag
+- Mushroom-Header mit Anzahl und Status-Farbe (rot/grün)
+- 3-Spalten Grid: ein Tag pro Spalte nebeneinander
+- Einträge einzeilig mit beschrifteten Feldern
+- Durchgestrichener Text wird als ~~Markdown~~ gerendert
+- Verlaufsgraph über 7 Tage
 
-Einrichtung: Dashboard erstellen → Raw-Editor → YAML einfügen → Entity-IDs anpassen.
+Voraussetzungen: `mushroom-cards` und `layout-card` (beide über HACS).
 
 ---
 
@@ -146,19 +149,19 @@ automation:
   - alias: "Vertretungsplan Benachrichtigung"
     trigger:
       - platform: state
-        entity_id: sensor.vertretungsplan_7b
+        entity_id: sensor.vertretungsplan_08b
     condition:
       - condition: numeric_state
-        entity_id: sensor.vertretungsplan_7b
+        entity_id: sensor.vertretungsplan_08b
         above: 0
     action:
       - service: notify.mobile_app_dein_handy
         data:
           title: "Vertretungsplan"
           message: >
-            {{ states('sensor.vertretungsplan_7b') }} Vertretung(en) für Klasse 7b:
-            {% for e in state_attr('sensor.vertretungsplan_7b', 'entries') %}
-            • {{ e.day }} – {{ e.lesson }}. Std: {{ e.subject }} ({{ e.info }})
+            {{ states('sensor.vertretungsplan_08b') }} Vertretung(en):
+            {% for e in state_attr('sensor.vertretungsplan_08b', 'entries') %}
+            {{ e.day }} · {{ e.art }} · {{ e.lesson }}. Std · {{ e.subject }} · Raum: {{ e.room }}{% if e.text %} · {{ e.text }}{% endif %}
             {% endfor %}
 ```
 
@@ -172,16 +175,16 @@ automation:
         at: "06:30:00"
     condition:
       - condition: numeric_state
-        entity_id: sensor.vertretungsplan_7b
+        entity_id: sensor.vertretungsplan_08b
         above: 0
     action:
       - service: notify.mobile_app_dein_handy
         data:
           title: "Vertretungsplan heute"
           message: >
-            Guten Morgen! {{ states('sensor.vertretungsplan_7b') }} Änderung(en):
-            {% for e in state_attr('sensor.vertretungsplan_7b', 'entries') %}
-            • {{ e.lesson }}. Std {{ e.subject }}: {{ e.substitute }} ({{ e.room }}) – {{ e.info }}
+            {{ states('sensor.vertretungsplan_08b') }} Änderung(en):
+            {% for e in state_attr('sensor.vertretungsplan_08b', 'entries') %}
+            {{ e.art }}: {{ e.lesson }}. Std {{ e.subject }} ({{ e.room }}){% if e.text %} – {{ e.text }}{% endif %}
             {% endfor %}
 ```
 
@@ -199,10 +202,8 @@ Die Integration nutzt die DSBmobile **Web API** — den gleichen Endpoint, den a
 2. **Daten abrufen**: `POST https://www.dsbmobile.de/jhw-*.ashx/GetData` mit gzip-komprimiertem, base64-kodiertem JSON-Payload
    → Gibt komprimierte JSON-Antwort mit allen Plänen, Aushängen und Dokumenten zurück
 
-3. **HTML-Pläne laden**: `GET https://dsbmobile.de/data/.../subst_001.htm`
-   → Untis-HTML wird mit BeautifulSoup geparst und nach Klasse gefiltert
-
-Die Web API ist zuverlässiger als die Mobile API, da sie den gleichen Datenkanal wie die offizielle Webseite nutzt.
+3. **HTML-Pläne laden**: `GET https://dsbmobile.de/data/.../subst_001.htm` (iso-8859-1 kodiert)
+   → Untis-HTML wird mit BeautifulSoup geparst, `<s>` Tags werden zu `~~Strikethrough~~` konvertiert
 
 ### Architektur
 
@@ -210,33 +211,38 @@ Die Web API ist zuverlässiger als die Mobile API, da sie den gleichen Datenkana
 graph TB
     subgraph Home Assistant
         CF[Config Flow<br><i>config_flow.py</i>]
+        OF[Options Flow<br><i>config_flow.py</i>]
         CO[DataUpdateCoordinator<br><i>sensor.py</i>]
-        SE[Vertretungsplan Sensor<br><i>sensor.py</i>]
-        AU[Automationen<br><i>automations.yaml</i>]
+        SE1[Sensor Klasse A<br><i>sensor.py</i>]
+        SE2[Sensor Klasse B<br><i>sensor.py</i>]
+        AU[Automationen]
     end
 
     subgraph DSBmobile Integration
         API[DSBMobileAPI<br><i>dsb_api.py</i>]
-        PA[HTML Parser<br><i>BeautifulSoup</i>]
+        PA[Untis HTML Parser<br><i>BeautifulSoup + iso-8859-1</i>]
     end
 
     subgraph DSBmobile Server
         LOGIN[Web Login<br><i>dsbmobile.de/Login.aspx</i>]
         WEBAPI[Web API<br><i>dsbmobile.de/jhw-*.ashx/GetData</i>]
-        HTML[Vertretungsplan HTML<br><i>dsbmobile.de/data/.../subst_001.htm</i>]
+        HTML[Vertretungsplan HTML<br><i>dsbmobile.de/data/.../subst_*.htm</i>]
     end
 
     CF -->|Zugangsdaten validieren| API
+    OF -->|Klassen ändern| CO
     CO -->|alle 30 Min| API
     API -->|1. POST Login + Cookies| LOGIN
     LOGIN -->|Session Cookie| API
     API -->|2. POST gzip+base64| WEBAPI
     WEBAPI -->|JSON mit Plan-URLs| API
     API -->|3. HTML laden| HTML
-    HTML -->|Untis HTML| PA
-    PA -->|Einträge gefiltert nach Klasse| CO
-    CO -->|Update| SE
-    SE -->|State + Attribute| AU
+    HTML -->|Untis HTML iso-8859-1| PA
+    PA -->|Alle Einträge ungefiltert| CO
+    CO -->|Lokaler Filter| SE1
+    CO -->|Lokaler Filter| SE2
+    SE1 -->|State + Attribute| AU
+    SE2 -->|State + Attribute| AU
 ```
 
 ### Datenfluss
@@ -250,7 +256,7 @@ sequenceDiagram
     participant HTML as Plan HTML
 
     HA->>CO: Update (alle 30 Min)
-    CO->>API: get_substitutions("7b")
+    CO->>API: get_substitutions("")
     API->>WEB: GET /Login.aspx
     WEB-->>API: HTML + ViewState
     API->>WEB: POST /Login.aspx (Credentials)
@@ -259,11 +265,12 @@ sequenceDiagram
     WEB-->>API: JSON (komprimiert) mit Plan-URLs
     loop Für jeden HTML-Plan (subst_*.htm)
         API->>HTML: GET /data/.../subst_001.htm
-        HTML-->>API: Untis HTML Tabelle
-        API->>API: Parse & Filter nach "7b"
+        HTML-->>API: Untis HTML (iso-8859-1)
+        API->>API: Decode + Parse (mon_title, mon_list, s-Tags)
     end
-    API-->>CO: List[SubstitutionEntry]
-    CO-->>HA: Sensor Update (count + entries)
+    API-->>CO: List[SubstitutionEntry] (alle Klassen)
+    CO-->>HA: Sensor 08b filtert lokal
+    CO-->>HA: Sensor 05a filtert lokal
 ```
 
 ### Komponentenübersicht
@@ -282,6 +289,7 @@ classDiagram
         +get_plans() list~PlanInfo~
         +get_substitutions(class_filter) list~SubstitutionEntry~
         -_parse_plan_html(html, filter) list~SubstitutionEntry~
+        -_cell_text(cell) str
     }
 
     class PlanInfo {
@@ -293,24 +301,27 @@ classDiagram
 
     class SubstitutionEntry {
         +day: str
+        +art: str
         +class_name: str
         +lesson: str
         +subject: str
-        +substitute: str
         +room: str
-        +info: str
+        +vertr_von: str
+        +nach: str
+        +text: str
         +raw_text: str
     }
 
     class DSBDataUpdateCoordinator {
         +api: DSBMobileAPI
-        +class_filter: str
         +_async_update_data() list~SubstitutionEntry~
     }
 
     class DSBVertretungsplanSensor {
+        -class_filter: str
         +native_value: int
         +extra_state_attributes: dict
+        -_filtered_entries() list~SubstitutionEntry~
     }
 
     class DSBMobileConfigFlow {
@@ -324,7 +335,7 @@ classDiagram
     DSBMobileAPI --> PlanInfo : erzeugt
     DSBMobileAPI --> SubstitutionEntry : erzeugt
     DSBDataUpdateCoordinator --> DSBMobileAPI : nutzt
-    DSBVertretungsplanSensor --> DSBDataUpdateCoordinator : liest von
+    DSBVertretungsplanSensor --> DSBDataUpdateCoordinator : filtert lokal
     DSBMobileConfigFlow --> DSBMobileAPI : validiert mit
     DSBMobileConfigFlow --> DSBMobileOptionsFlow : Options Flow
 ```
@@ -337,11 +348,11 @@ classDiagram
 |----------------------------------|------------------------------------------------------------------------|
 | Integration nicht sichtbar       | HA neu starten, Ordnerstruktur prüfen (`custom_components/dsbmobile/`) |
 | "Ungültige Zugangsdaten"         | Benutzer-ID und Passwort auf dsbmobile.de prüfen                       |
-| Sensor zeigt 0, obwohl es Vertretungen gibt | Klasse exakt so eingeben wie im Plan (z.B. `7b` nicht `7B` oder `Klasse 7b`) |
-| Keine Aktualisierung             | Unter Entwicklerwerkzeuge → Dienste → `homeassistant.update_entity` manuell triggern |
-| Fehler im Log                    | Logger aktivieren: `custom_components.dsbmobile: debug` in `configuration.yaml` |
-| Update von v1.x auf v2.0        | Integration löschen und neu einrichten (Auth-Methode hat sich geändert) |
+| Sensor zeigt 0                   | Klasse exakt wie im Plan eingeben (z.B. `08b` nicht `8b`)             |
+| Keine Aktualisierung             | Entwicklerwerkzeuge → Dienste → `homeassistant.update_entity`          |
+| Update von v1.x auf v2.x        | Integration löschen und neu einrichten (Auth-Methode geändert)         |
 | Klasse ändern                    | Einstellungen → Geräte & Dienste → DSBmobile → Konfigurieren          |
+| Fehler im Log                    | Debug-Logging aktivieren (siehe unten)                                 |
 
 ### Debug-Logging aktivieren
 
