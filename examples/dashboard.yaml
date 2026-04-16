@@ -1,5 +1,5 @@
 ###############################################################################
-# DSBmobile Vertretungsplan – Beispiel Dashboard
+# DSBmobile Vertretungsplan – Beispiel Dashboard (Breitbild 1920x1200)
 #
 # Einrichtung:
 #   1. In Home Assistant: Einstellungen → Dashboards → Dashboard hinzufügen
@@ -9,7 +9,8 @@
 #
 # Voraussetzung:
 #   - DSBmobile Integration v2.2+ installiert
-#   - Optional: mushroom-cards (HACS) für Header
+#   - mushroom-cards (HACS) für Header/Status
+#   - layout-card (HACS) für Grid-Layout
 ###############################################################################
 
 title: Vertretungsplan
@@ -17,15 +18,26 @@ views:
   - title: Vertretungsplan
     icon: mdi:school
     path: vertretungsplan
+    type: custom:grid-layout
+    layout:
+      grid-template-columns: 1fr 1fr 1fr
+      grid-template-rows: auto auto
+      grid-template-areas: |
+        "header header header"
+        "day1 day2 day3"
+        "history history history"
+      margin: 0
     cards:
 
-      # ── Header ───────────────────────────────────────────────────────
+      # ── Header (volle Breite) ────────────────────────────────────────
       - type: custom:mushroom-template-card
+        view_layout:
+          grid-area: header
         primary: |
           Vertretungsplan {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }}
         secondary: |
           {% set count = states('sensor.vertretungsplan_08b') | int(0) %}
-          {% if count > 0 %}{{ count }} Vertretung{{ 'en' if count > 1 else '' }}{% else %}Keine Vertretungen{% endif %}
+          {% if count > 0 %}{{ count }} Vertretung{{ 'en' if count > 1 else '' }}{% else %}Keine Vertretungen — alles nach Plan{% endif %}
         icon: mdi:school
         icon_color: "{% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}red{% else %}green{% endif %}"
         card_mod:
@@ -38,48 +50,83 @@ views:
               --secondary-text-color: rgba(255,255,255,0.6);
             }
             mushroom-state-info {
-              --card-primary-font-size: 20px;
+              --card-primary-font-size: 22px;
               --card-primary-font-weight: 700;
             }
 
-      # ── Vertretungen nach Tag ────────────────────────────────────────
-      - type: conditional
-        conditions:
-          - condition: numeric_state
-            entity: sensor.vertretungsplan_08b
-            above: 0
-        card:
-          type: markdown
-          content: |
-            {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
-            {% if entries %}
-            {% set days = entries | map(attribute='day') | unique | list %}
-            {% for day in days %}
-            ## 📅 {{ day }}
-            {% for e in entries if e.day == day %}
-            **{{ e.art }}** · {{ e.lesson }}. Stunde · {{ e.subject }}
-            Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
+      # ── Tag 1 (linke Spalte) ─────────────────────────────────────────
+      - type: markdown
+        view_layout:
+          grid-area: day1
+        content: |
+          {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
+          {% if entries %}
+          {% set days = entries | map(attribute='day') | unique | list %}
+          {% if days | length > 0 %}
+          ## 📅 {{ days[0] }}
+          {% for e in entries if e.day == days[0] %}
+          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
+          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-            ---
-            {% endfor %}
-            {% endfor %}
-            {% endif %}
+          ---
+          {% endfor %}
+          {% else %}
+          _Keine Daten_
+          {% endif %}
+          {% else %}
+          _Keine Vertretungen_
+          {% endif %}
 
-      # ── Alles normal ─────────────────────────────────────────────────
-      - type: conditional
-        conditions:
-          - condition: numeric_state
-            entity: sensor.vertretungsplan_08b
-            below: 1
-        card:
-          type: custom:mushroom-template-card
-          primary: Keine Vertretungen
-          secondary: "Klasse {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }} — alles nach Plan"
-          icon: mdi:check-circle
-          icon_color: green
+      # ── Tag 2 (mittlere Spalte) ─────────────────────────────────────
+      - type: markdown
+        view_layout:
+          grid-area: day2
+        content: |
+          {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
+          {% if entries %}
+          {% set days = entries | map(attribute='day') | unique | list %}
+          {% if days | length > 1 %}
+          ## 📅 {{ days[1] }}
+          {% for e in entries if e.day == days[1] %}
+          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
+          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-      # ── Verlauf ──────────────────────────────────────────────────────
+          ---
+          {% endfor %}
+          {% else %}
+          _Kein weiterer Tag_
+          {% endif %}
+          {% else %}
+          &nbsp;
+          {% endif %}
+
+      # ── Tag 3 (rechte Spalte) ───────────────────────────────────────
+      - type: markdown
+        view_layout:
+          grid-area: day3
+        content: |
+          {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
+          {% if entries %}
+          {% set days = entries | map(attribute='day') | unique | list %}
+          {% if days | length > 2 %}
+          ## 📅 {{ days[2] }}
+          {% for e in entries if e.day == days[2] %}
+          **{{ e.art }}** · {{ e.lesson }}. Std · {{ e.subject }}
+          Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
+
+          ---
+          {% endfor %}
+          {% else %}
+          _Kein weiterer Tag_
+          {% endif %}
+          {% else %}
+          &nbsp;
+          {% endif %}
+
+      # ── Verlauf (volle Breite) ──────────────────────────────────────
       - type: history-graph
+        view_layout:
+          grid-area: history
         title: "📊 Verlauf (7 Tage)"
         hours_to_show: 168
         entities:
