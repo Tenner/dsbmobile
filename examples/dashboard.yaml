@@ -9,7 +9,7 @@
 #
 # Voraussetzung:
 #   - DSBmobile Integration v2.2+ installiert
-#   - Optional: mushroom-cards + card-mod (HACS) für Styling
+#   - Optional: mushroom-cards (HACS) für Header
 ###############################################################################
 
 title: Vertretungsplan
@@ -25,14 +25,9 @@ views:
           Vertretungsplan {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }}
         secondary: |
           {% set count = states('sensor.vertretungsplan_08b') | int(0) %}
-          {% if count > 0 %}
-            {{ count }} Vertretung{{ 'en' if count > 1 else '' }}
-          {% else %}
-            Keine Vertretungen
-          {% endif %}
+          {% if count > 0 %}{{ count }} Vertretung{{ 'en' if count > 1 else '' }}{% else %}Keine Vertretungen{% endif %}
         icon: mdi:school
-        icon_color: >
-          {% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}red{% else %}green{% endif %}
+        icon_color: "{% if states('sensor.vertretungsplan_08b') | int(0) > 0 %}red{% else %}green{% endif %}"
         card_mod:
           style: |
             ha-card {
@@ -47,7 +42,7 @@ views:
               --card-primary-font-weight: 700;
             }
 
-      # ── Vertretungstabelle nach Tag gruppiert ────────────────────────
+      # ── Vertretungen nach Tag ────────────────────────────────────────
       - type: conditional
         conditions:
           - condition: numeric_state
@@ -55,18 +50,20 @@ views:
             above: 0
         card:
           type: markdown
-          content: >
+          content: |
             {% set entries = state_attr('sensor.vertretungsplan_08b', 'entries') %}
+            {% if entries %}
             {% set days = entries | map(attribute='day') | unique | list %}
             {% for day in days %}
-            ### 📅 {{ day }}
+            ## 📅 {{ day }}
+            {% for e in entries if e.day == day %}
+            **{{ e.art }}** · {{ e.lesson }}. Stunde · {{ e.subject }}
+            Raum: {{ e.room }}{% if e.text %} · _{{ e.text }}_{% endif %}
 
-            | Art | Std | Fach | Raum | Info |
-            |:----|:---:|:----:|:----:|:-----|
-            {% for e in entries if e.day == day -%}
-            | {{ e.art }} | {{ e.lesson }} | {{ e.subject }} | {{ e.room }} | {{ e.text }} |
+            ---
             {% endfor %}
             {% endfor %}
+            {% endif %}
 
       # ── Alles normal ─────────────────────────────────────────────────
       - type: conditional
@@ -77,8 +74,7 @@ views:
         card:
           type: custom:mushroom-template-card
           primary: Keine Vertretungen
-          secondary: >
-            Klasse {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }} — alles nach Plan
+          secondary: "Klasse {{ state_attr('sensor.vertretungsplan_08b', 'class_filter') }} — alles nach Plan"
           icon: mdi:check-circle
           icon_color: green
 
