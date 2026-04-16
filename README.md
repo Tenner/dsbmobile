@@ -1,5 +1,9 @@
 # DSBmobile Vertretungsplan – Home Assistant Integration
 
+[![GitHub Release](https://img.shields.io/github/v/release/Tenner/dsbmobile?style=flat-square)](https://github.com/Tenner/dsbmobile/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=flat-square)](https://github.com/hacs/integration)
+
 Custom Integration für [Home Assistant](https://www.home-assistant.io/), die den Vertretungsplan von [DSBmobile](https://www.dsbmobile.de/) ausliest und als Sensor bereitstellt.
 
 ## Features
@@ -57,7 +61,7 @@ custom_components/dsbmobile/
 ### Über HACS (Custom Repository)
 
 1. In HACS auf die drei Punkte oben rechts klicken → **Benutzerdefinierte Repositories**
-2. Repository-URL eingeben (z.B. `https://github.com/dein-user/ha-dsbmobile`)
+2. Repository-URL eingeben: `https://github.com/Tenner/dsbmobile`
 3. Kategorie: **Integration**
 4. Hinzufügen und installieren
 5. Home Assistant neu starten
