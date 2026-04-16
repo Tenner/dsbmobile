@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -16,6 +16,12 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# ConType values from DSBmobile API
+CONTYPE_CHILDS = 2   # Contains child items
+CONTYPE_HTML = 4     # Detail is a link to an HTML page
+CONTYPE_TEXT = 5     # Detail is plain text
+CONTYPE_IMAGE = 6    # Detail is a link to a PNG/GIF image
 
 
 @dataclass
@@ -32,6 +38,17 @@ class SubstitutionEntry:
     raw_text: str
 
 
+@dataclass
+class PlanInfo:
+    """Metadata about a substitution plan."""
+
+    title: str
+    date: str
+    url: str
+    con_type: int
+    image_urls: list[str] = field(default_factory=list)
+
+
 class DSBMobileAPI:
     """Client for the DSBmobile Mobile API."""
 
@@ -40,6 +57,7 @@ class DSBMobileAPI:
         self._password = password
         self._session = session
         self._token: str | None = None
+        self.last_plans: list[PlanInfo] = []
 
     async def authenticate(self) -> bool:
         """Authenticate and get a session token."""
@@ -69,7 +87,7 @@ class DSBMobileAPI:
             _LOGGER.error("Authentication failed: %s", err)
             return False
 
-    async def get_plans(self) -> list[dict]:
+    async def get_plans(self) -> list[PlanInfo]:
         """Fetch timetable plan URLs and metadata."""
         if not self._token:
             if not await self.authenticate():
@@ -86,17 +104,60 @@ class DSBMobileAPI:
             return []
 
         _LOGGER.debug("Timetables response: %d items", len(data) if data else 0)
-        plans = []
+        plans: list[PlanInfo] = []
+
         for item in data or []:
-            for child in item.get("Childs", []):
-                detail = child.get("Detail", "")
+            parent_type = item.get("ConType", 0)
+            title = item.get("Title", "")
+            date = item.get("Date", "")
+            childs = item.get("Childs", [])
+
+            _LOGGER.debug(
+                "Plan item: title=%s, ConType=%s, childs=%d",
+                title, parent_type, len(childs),
+            )
+
+            if parent_type == CONTYPE_CHILDS:
+                # Parent with children — collect all child URLs
+                image_urls = []
+                html_url = ""
+                child_type = 0
+
+                for child in childs:
+                    detail = child.get("Detail", "")
+                    ct = child.get("ConType", 0)
+                    _LOGGER.debug("  Child: ConType=%s, Detail=%s", ct, detail[:80] if detail else "")
+
+                    if not detail:
+                        continue
+
+                    child_type = ct
+                    if ct == CONTYPE_IMAGE:
+                        image_urls.append(detail)
+                    elif ct == CONTYPE_HTML:
+                        html_url = detail
+
+                if html_url:
+                    plans.append(PlanInfo(
+                        title=title, date=date, url=html_url,
+                        con_type=CONTYPE_HTML,
+                    ))
+                elif image_urls:
+                    plans.append(PlanInfo(
+                        title=title, date=date, url=image_urls[0],
+                        con_type=CONTYPE_IMAGE, image_urls=image_urls,
+                    ))
+            else:
+                # Direct item
+                detail = item.get("Detail", "")
                 if detail:
-                    plans.append({
-                        "title": item.get("Title", ""),
-                        "date": item.get("Date", ""),
-                        "url": detail,
-                    })
-        _LOGGER.debug("Found %d plan URLs", len(plans))
+                    plans.append(PlanInfo(
+                        title=title, date=date, url=detail,
+                        con_type=parent_type,
+                    ))
+
+        _LOGGER.debug("Found %d plans", len(plans))
+        self.last_plans = plans
         return plans
 
     async def get_substitutions(self, class_filter: str = "") -> list[SubstitutionEntry]:
@@ -105,14 +166,24 @@ class DSBMobileAPI:
         entries: list[SubstitutionEntry] = []
 
         for plan in plans:
-            url = plan["url"]
+            if plan.con_type == CONTYPE_IMAGE:
+                _LOGGER.debug(
+                    "Plan '%s' is image-based (%d images), skipping HTML parse",
+                    plan.title, len(plan.image_urls),
+                )
+                continue
+
+            if plan.con_type != CONTYPE_HTML:
+                _LOGGER.debug("Plan '%s' has ConType %s, skipping", plan.title, plan.con_type)
+                continue
+
             try:
-                async with self._session.get(url) as resp:
+                async with self._session.get(plan.url) as resp:
                     if resp.status != 200:
                         continue
                     html = await resp.text()
             except aiohttp.ClientError as err:
-                _LOGGER.warning("Failed to fetch plan HTML from %s: %s", url, err)
+                _LOGGER.warning("Failed to fetch plan HTML from %s: %s", plan.url, err)
                 continue
 
             entries.extend(self._parse_plan_html(html, class_filter))
@@ -127,7 +198,6 @@ class DSBMobileAPI:
         current_day = ""
 
         for el in soup.find_all(["div", "tr"]):
-            # Day headers
             if el.name == "div" and "dayHeader" in (el.get("class") or []):
                 current_day = el.get_text(" ", strip=True)
                 continue
@@ -143,12 +213,9 @@ class DSBMobileAPI:
             if not raw:
                 continue
 
-            # Apply class filter
             if class_filter and class_filter.lower() not in raw.lower():
                 continue
 
-            # Parse cells: typical Untis columns are
-            # Klasse | Stunde | Fach | Vertreter | Raum | Hinweis
             cell_texts = [c.get_text(strip=True) for c in cells]
             entry = SubstitutionEntry(
                 day=current_day,

@@ -18,7 +18,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_CLASS, DEFAULT_SCAN_INTERVAL
-from .dsb_api import DSBMobileAPI, SubstitutionEntry
+from .dsb_api import DSBMobileAPI, SubstitutionEntry, CONTYPE_IMAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,23 +105,32 @@ class DSBVertretungsplanSensor(CoordinatorEntity[DSBDataUpdateCoordinator], Sens
     @property
     def extra_state_attributes(self) -> dict:
         """Return detailed substitution entries as attributes."""
-        if not self.coordinator.data:
-            return {"entries": [], "class_filter": self._class_filter}
-
         entries = []
-        for e in self.coordinator.data:
-            entries.append({
-                "day": e.day,
-                "class": e.class_name,
-                "lesson": e.lesson,
-                "subject": e.subject,
-                "substitute": e.substitute,
-                "room": e.room,
-                "info": e.info,
-            })
+        if self.coordinator.data:
+            for e in self.coordinator.data:
+                entries.append({
+                    "day": e.day,
+                    "class": e.class_name,
+                    "lesson": e.lesson,
+                    "subject": e.subject,
+                    "substitute": e.substitute,
+                    "room": e.room,
+                    "info": e.info,
+                })
+
+        # Collect image plan URLs
+        image_plans = []
+        for plan in self.coordinator.api.last_plans:
+            if plan.con_type == CONTYPE_IMAGE:
+                image_plans.append({
+                    "title": plan.title,
+                    "date": plan.date,
+                    "images": plan.image_urls,
+                })
 
         return {
             "class_filter": self._class_filter,
             "count": len(entries),
             "entries": entries,
+            "image_plans": image_plans,
         }
