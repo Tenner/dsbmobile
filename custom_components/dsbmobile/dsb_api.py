@@ -173,17 +173,42 @@ class DSBMobileAPI:
                 )
                 continue
 
-            if plan.con_type != CONTYPE_HTML:
-                _LOGGER.debug("Plan '%s' has ConType %s, skipping", plan.title, plan.con_type)
+            # Also skip if URL looks like an image regardless of ConType
+            url_lower = plan.url.lower()
+            if url_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp")):
+                _LOGGER.debug("Plan '%s' URL ends with image extension, skipping: %s", plan.title, plan.url)
+                # Reclassify as image plan so it shows up in attributes
+                plan.con_type = CONTYPE_IMAGE
+                plan.image_urls = [plan.url]
                 continue
 
             try:
                 async with self._session.get(plan.url) as resp:
                     if resp.status != 200:
                         continue
+
+                    # Check Content-Type before reading as text
+                    content_type = resp.headers.get("Content-Type", "")
+                    _LOGGER.debug("Plan '%s' Content-Type: %s", plan.title, content_type)
+
+                    if "image" in content_type:
+                        _LOGGER.debug("Plan '%s' is an image (Content-Type), skipping", plan.title)
+                        plan.con_type = CONTYPE_IMAGE
+                        plan.image_urls = [plan.url]
+                        continue
+
+                    if "text/html" not in content_type and "text/plain" not in content_type:
+                        _LOGGER.debug("Plan '%s' has unexpected Content-Type: %s, skipping", plan.title, content_type)
+                        continue
+
                     html = await resp.text()
             except aiohttp.ClientError as err:
-                _LOGGER.warning("Failed to fetch plan HTML from %s: %s", plan.url, err)
+                _LOGGER.warning("Failed to fetch plan from %s: %s", plan.url, err)
+                continue
+            except UnicodeDecodeError as err:
+                _LOGGER.warning("Plan '%s' is not text (decode error), treating as image: %s", plan.title, err)
+                plan.con_type = CONTYPE_IMAGE
+                plan.image_urls = [plan.url]
                 continue
 
             entries.extend(self._parse_plan_html(html, class_filter))
