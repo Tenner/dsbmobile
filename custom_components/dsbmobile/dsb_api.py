@@ -102,9 +102,9 @@ class DSBMobileAPI:
 
     async def _call_web_api(self) -> dict | None:
         """Call the Web API GetData endpoint."""
-        if not self._logged_in:
-            if not await self._web_login():
-                return None
+        # Always re-login before each API call to ensure fresh session cookies
+        if not await self._web_login():
+            return None
 
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         payload = {
@@ -141,7 +141,8 @@ class DSBMobileAPI:
                 result = await resp.json(content_type=None)
                 resp_data = result.get("d", "")
                 if not resp_data:
-                    _LOGGER.error("Web API returned no data: %s", result)
+                    _LOGGER.error("Web API returned no data, session may have expired")
+                    self._logged_in = False
                     return None
 
                 decoded = gzip.decompress(base64.b64decode(resp_data))
@@ -156,6 +157,7 @@ class DSBMobileAPI:
 
         except (aiohttp.ClientError, Exception) as err:
             _LOGGER.error("Web API call failed: %s", err)
+            self._logged_in = False
             return None
 
     async def get_plans(self) -> list[PlanInfo]:
