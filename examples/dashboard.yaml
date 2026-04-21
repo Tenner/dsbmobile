@@ -8,7 +8,7 @@
 #   4. Entity-IDs anpassen (sensor.vertretungsplan_08b → deine Klasse)
 #
 # Voraussetzung:
-#   - DSBmobile Integration v2.2+ installiert
+#   - DSBmobile Integration v2.5+ installiert
 #   - mushroom-cards (HACS) für Header/Status
 #   - layout-card (HACS) für Grid-Layout
 ###############################################################################
@@ -21,15 +21,15 @@ views:
     type: custom:grid-layout
     layout:
       grid-template-columns: 1fr 1fr 1fr
-      grid-template-rows: auto auto
+      grid-template-rows: auto auto auto
       grid-template-areas: |
         "header header header"
         "day1 day2 day3"
-        "history history history"
+        "legend legend history"
       margin: 0
     cards:
 
-      # ── Header (volle Breite) ────────────────────────────────────────
+      # ── Header ───────────────────────────────────────────────────────
       - type: custom:mushroom-template-card
         view_layout:
           grid-area: header
@@ -54,7 +54,7 @@ views:
               --card-primary-font-weight: 700;
             }
 
-      # ── Tag 1 (linke Spalte) ─────────────────────────────────────────
+      # ── Tag 1 ────────────────────────────────────────────────────────
       - type: markdown
         view_layout:
           grid-area: day1
@@ -65,7 +65,11 @@ views:
           {% if days | length > 0 %}
           ## 📅 {{ days[0] }}
           {% for e in entries if e.day == days[0] %}
-          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
+          {% set icons = {'Entfall':'🔴','Vertretung':'🔵','Verlegung':'🟡','Statt-Vertretung':'🟣','Raum-Vtr.':'🟠','Betreuung':'🟢','Vtr. ohne Lehrer':'⚪'} %}
+          {% set icon = icons.get(e.art, '⚫') %}
+          {% set fach = e.subject | replace('?',' → ') %}
+          {% set raum = e.room | replace('?',' → ') %}
+          {{ icon }} **{{ e.lesson }}. Std** · {{ fach }}{% if raum and raum != '---' %} · {{ raum }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
           {% endfor %}
           {% else %}
@@ -75,7 +79,7 @@ views:
           _Keine Vertretungen_
           {% endif %}
 
-      # ── Tag 2 (mittlere Spalte) ─────────────────────────────────────
+      # ── Tag 2 ────────────────────────────────────────────────────────
       - type: markdown
         view_layout:
           grid-area: day2
@@ -86,7 +90,11 @@ views:
           {% if days | length > 1 %}
           ## 📅 {{ days[1] }}
           {% for e in entries if e.day == days[1] %}
-          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
+          {% set icons = {'Entfall':'🔴','Vertretung':'🔵','Verlegung':'🟡','Statt-Vertretung':'🟣','Raum-Vtr.':'🟠','Betreuung':'🟢','Vtr. ohne Lehrer':'⚪'} %}
+          {% set icon = icons.get(e.art, '⚫') %}
+          {% set fach = e.subject | replace('?',' → ') %}
+          {% set raum = e.room | replace('?',' → ') %}
+          {{ icon }} **{{ e.lesson }}. Std** · {{ fach }}{% if raum and raum != '---' %} · {{ raum }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
           {% endfor %}
           {% else %}
@@ -96,7 +104,7 @@ views:
           &nbsp;
           {% endif %}
 
-      # ── Tag 3 (rechte Spalte) ───────────────────────────────────────
+      # ── Tag 3 ────────────────────────────────────────────────────────
       - type: markdown
         view_layout:
           grid-area: day3
@@ -107,7 +115,11 @@ views:
           {% if days | length > 2 %}
           ## 📅 {{ days[2] }}
           {% for e in entries if e.day == days[2] %}
-          **{{ e.art }}** · {{ e.class }} · {{ e.lesson }}. Std · Fach: {{ e.subject }} · Raum: {{ e.room }}{% if e.vertr_von %} · von: {{ e.vertr_von }}{% endif %}{% if e.nach %} · nach: {{ e.nach }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
+          {% set icons = {'Entfall':'🔴','Vertretung':'🔵','Verlegung':'🟡','Statt-Vertretung':'🟣','Raum-Vtr.':'🟠','Betreuung':'🟢','Vtr. ohne Lehrer':'⚪'} %}
+          {% set icon = icons.get(e.art, '⚫') %}
+          {% set fach = e.subject | replace('?',' → ') %}
+          {% set raum = e.room | replace('?',' → ') %}
+          {{ icon }} **{{ e.lesson }}. Std** · {{ fach }}{% if raum and raum != '---' %} · {{ raum }}{% endif %}{% if e.text %} · _{{ e.text }}_{% endif %}
 
           {% endfor %}
           {% else %}
@@ -117,7 +129,14 @@ views:
           &nbsp;
           {% endif %}
 
-      # ── Verlauf (volle Breite) ──────────────────────────────────────
+      # ── Legende ─────────────────────────────────────────────────────
+      - type: markdown
+        view_layout:
+          grid-area: legend
+        content: |
+          🔴 Entfall · 🔵 Vertretung · 🟡 Verlegung · 🟣 Statt-Vertr. · 🟠 Raum · 🟢 Betreuung · ⚪ ohne Lehrer
+
+      # ── Verlauf ─────────────────────────────────────────────────────
       - type: history-graph
         view_layout:
           grid-area: history
